@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: agent-osctl COMMAND
+
+Commands:
+  doctor             Check Agent-OS foundation and required components
+  browser info       Print Agent Web machine-readable capabilities
+  browser status     Show Agent Web service status
+  browser url        Print the human noVNC URL
+  browser update     Update Agent Web
+  browser password   Change the Agent Web web password
+EOF
+}
+
+doctor() {
+    echo "Agent-OS doctor"
+    echo "==============="
+    if ! command -v agent-webctl >/dev/null 2>&1; then
+        echo "[FAIL] Agent Web controller is not installed."
+        return 1
+    fi
+
+    info=$(agent-webctl info)
+    printf '%s\n' "$info"
+    if printf '%s\n' "$info" | grep -qx 'READY=true'; then
+        echo "[PASS] Browser subsystem is ready."
+    else
+        echo "[FAIL] Browser subsystem is not ready."
+        return 1
+    fi
+}
+
+command_name=${1:-doctor}
+case "$command_name" in
+    doctor)
+        doctor
+        ;;
+    browser)
+        subcommand=${2:-info}
+        command -v agent-webctl >/dev/null 2>&1 || {
+            echo "Agent Web is not installed." >&2
+            exit 69
+        }
+        case "$subcommand" in
+            info|status|url)
+                exec agent-webctl "$subcommand"
+                ;;
+            update)
+                exec agent-webctl update
+                ;;
+            password)
+                exec agent-webctl set-password
+                ;;
+            *)
+                echo "Unknown browser command: $subcommand" >&2
+                usage >&2
+                exit 64
+                ;;
+        esac
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $command_name" >&2
+        usage >&2
+        exit 64
+        ;;
+esac
+
