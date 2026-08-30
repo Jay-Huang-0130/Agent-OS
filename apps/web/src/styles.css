@@ -567,6 +567,105 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .dock-placeholder { font-size: 10px; }
 }
 
+/* Readable type scale and horizontal task board */
+.polished-shell .eyebrow { font-size: 12px; }
+.polished-shell .sidebar nav button { font-size: 14px; }
+.polished-shell .topbar-title strong { font-size: 14px; }
+.polished-shell .topbar-title small, .polished-shell .connection { font-size: 11px; }
+.polished-shell .agent-status strong, .polished-shell .sidebar-user strong { font-size: 12px; }
+.polished-shell .agent-status small, .polished-shell .sidebar-user small { font-size: 10.5px; }
+.polished-shell .today-date { font-size: 13px; }
+.polished-shell .today-header > div > p:last-child,
+.polished-shell .tasks-header > div > p:last-child { font-size: 15px; }
+.polished-shell .briefing-trigger strong { font-size: 13px; }
+.polished-shell .briefing-trigger small { font-size: 11px; }
+.polished-shell .today-section-head h2 { font-size: 18px; }
+.polished-shell .today-section-head p { font-size: 12px; }
+.polished-shell .section-count, .polished-shell .mark-all { font-size: 11px; }
+.polished-shell .task-card-kicker span,
+.polished-shell .task-card-kicker small,
+.polished-shell .result-content > div span,
+.polished-shell .result-content > div small { font-size: 11px; }
+.polished-shell .attention-card h3, .polished-shell .result-card h3 { font-size: 15px; }
+.polished-shell .attention-card p, .polished-shell .result-card p { font-size: 13px; line-height: 1.6; }
+.polished-shell .attention-actions button { font-size: 12px; }
+.polished-shell .all-clear h3 { font-size: 15px; }
+.polished-shell .all-clear p { font-size: 12px; }
+.polished-shell .tasks-header .primary, .polished-shell .task-filters button { font-size: 12px; }
+.polished-shell .task-filters span { font-size: 10px; }
+.polished-shell .task-progress strong,
+.polished-shell .task-health,
+.polished-shell .task-schedule { font-size: 11px; }
+.polished-shell .briefing-lede { font-size: 14px; }
+.polished-shell .briefing-stats span { font-size: 11px; }
+.polished-shell .briefing-note p { font-size: 12px; }
+.polished-shell .state-pill, .polished-shell .kind-copy { font-size: 11px; }
+.polished-shell .drawer-title > p:last-child,
+.polished-shell .current-action > p,
+.polished-shell .result-summary > p { font-size: 13px; }
+.polished-shell .current-action-head small,
+.polished-shell .current-action-head em { font-size: 10px; }
+.polished-shell .current-action-head strong,
+.polished-shell .drawer-section-title h3,
+.polished-shell .text-button { font-size: 12px; }
+.polished-shell .drawer-primary { font-size: 12px; }
+.polished-shell .drawer-section-title button,
+.polished-shell .timeline small,
+.polished-shell .artifact small { font-size: 10px; }
+.polished-shell .timeline strong, .polished-shell .artifact strong { font-size: 12px; }
+.polished-shell .drawer-compose input { font-size: 12px; }
+.polished-shell .assistant-identity strong { font-size: 13px; }
+.polished-shell .assistant-identity small { font-size: 10px; }
+.polished-shell .assistant-welcome span,
+.polished-shell .prompt-chips button { font-size: 12px; }
+.polished-shell .assistant-compose > div span { font-size: 10px; }
+.polished-shell .accepted-task > div > p:not(.eyebrow) { font-size: 12px; }
+.polished-shell .accepted-task > div > div span,
+.polished-shell .accepted-task > div > div button { font-size: 10px; }
+.polished-shell .dock-placeholder { font-size: 13px; }
+
+.task-board { width: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(272px, 292px); align-items: start; gap: 14px; margin-top: -12px; padding: 2px 2px 18px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #b8c5bc transparent; scroll-snap-type: x proximity; }
+.task-board.single-column { grid-auto-columns: minmax(300px, 390px); }
+.task-column { min-height: 520px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--soft) 72%, var(--panel)); scroll-snap-align: start; }
+.task-column-head { min-height: 92px; padding: 16px 16px 13px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 56%, transparent); }
+.task-column-head > div { display: flex; align-items: center; gap: 8px; }
+.task-column-head i { width: 8px; height: 8px; border-radius: 50%; background: #b87b2b; }
+.task-column.running .task-column-head i { background: #299a67; box-shadow: 0 0 0 4px #299a6717; }
+.task-column.watching .task-column-head i { background: #3880a8; }
+.task-column.scheduled .task-column-head i { background: #786cae; }
+.task-column.completed .task-column-head i { background: #829088; }
+.task-column-head h2 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+.task-column-head span { min-width: 22px; height: 22px; display: grid; place-items: center; padding: 0 6px; border-radius: 20px; color: var(--muted); background: var(--panel); font-size: 11px; font-weight: 700; }
+.task-column-head p { margin: 9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.task-column-body { display: grid; align-content: start; gap: 10px; padding: 10px; }
+.board-task-card { width: 100%; display: grid; gap: 11px; padding: 15px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: var(--panel); box-shadow: 0 5px 18px rgba(31, 48, 39, .045); text-align: left; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.board-task-card:hover { transform: translateY(-2px); border-color: #bdcdc2; box-shadow: 0 10px 26px rgba(31, 48, 39, .09); }
+.board-card-meta { display: flex; align-items: center; justify-content: space-between; color: var(--muted); }
+.task-kind-tag { padding: 5px 7px; border-radius: 7px; color: var(--green); background: var(--green-soft); font-size: 10px; font-weight: 750; }
+.task-kind-tag.watch { color: #377b9d; background: #e7f1f6; }
+.task-kind-tag.scheduled { color: #7466a6; background: #efedf7; }
+.board-task-card h3 { margin: 0; font-size: 15px; line-height: 1.35; letter-spacing: -.015em; }
+.board-task-card > p { display: -webkit-box; overflow: hidden; margin: -2px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.board-task-card .task-progress { margin-top: 2px; }
+.board-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.board-card-footer span { overflow: hidden; color: var(--muted); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.board-card-footer strong { flex: 0 0 auto; color: #a66718; font-size: 10px; }
+.add-task-card { width: 100%; display: flex; align-items: center; gap: 7px; padding: 11px 12px; border: 1px dashed transparent; border-radius: 10px; color: var(--muted); background: transparent; font-size: 12px; text-align: left; }
+.add-task-card span { font-size: 17px; line-height: 1; }
+.add-task-card:hover { color: var(--green); border-color: #bdd0c3; background: color-mix(in srgb, var(--panel) 55%, transparent); }
+
+:root[data-theme="dark"] .task-kind-tag.watch { color: #82b9d4; background: #1d3440; }
+:root[data-theme="dark"] .task-kind-tag.scheduled { color: #aaa0d5; background: #2b2941; }
+
+@media (max-width: 760px) {
+  .polished-shell .today-header > div > p:last-child,
+  .polished-shell .tasks-header > div > p:last-child { font-size: 14px; }
+  .polished-shell .dock-placeholder { font-size: 12px; }
+  .task-board { width: calc(100vw - 16px); grid-auto-columns: minmax(278px, calc(100vw - 48px)); margin-right: -16px; padding-right: 18px; }
+  .task-board.single-column { grid-auto-columns: minmax(278px, calc(100vw - 48px)); }
+  .task-column { min-height: 490px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

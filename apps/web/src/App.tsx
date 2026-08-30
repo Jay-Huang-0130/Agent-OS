@@ -334,7 +334,34 @@ function TasksPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTas
     { state: "scheduled", title: "已安排", note: "會在指定時間自動執行" },
     { state: "completed", title: "最近完成", note: "已交付的成果" },
   ];
-  return <div className="tasks-page"><header className="tasks-header"><div><p className="eyebrow">Tasks</p><h1>所有任務</h1><p>每件事都有自己的節奏，我會持續替你看著。</p></div><button className="primary" onClick={onOpenAssistant}><Icon name="sparkle" />交付新任務</button></header><div className="task-filters"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部 <span>{demoTasks.length}</span></button>{groups.slice(0, 4).map((group) => <button key={group.state} className={filter === group.state ? "active" : ""} onClick={() => setFilter(group.state)}>{group.title}<span>{demoTasks.filter((task) => task.state === group.state).length}</span></button>)}</div><div className="task-groups">{groups.filter((group) => filter === "all" || filter === group.state).map((group) => { const tasks = demoTasks.filter((task) => task.state === group.state); return <section className={`task-group ${group.state}`} key={group.state}><header><div><i /><h2>{group.title}</h2><span>{tasks.length}</span></div><p>{group.note}</p></header><div className="task-row-list">{tasks.map((task) => <button className="task-row" key={task.id} onClick={() => onOpenTask(task)}><div className="task-row-title"><span className={`task-type-icon ${task.kind}`}><Icon name={task.kind === "watch" ? "eye" : task.kind === "scheduled" ? "update" : "sparkle"} /></span><div><h3>{task.title}</h3><span>{kindLabel(task.kind)}・{task.state === "attention" ? task.attentionType : task.meta}</span></div></div><TaskProgress task={task} /><Icon name="chevron" /></button>)}</div></section>; })}</div></div>;
+  return <div className="tasks-page">
+    <header className="tasks-header">
+      <div><p className="eyebrow">Tasks</p><h1>所有任務</h1><p>依目前狀態排列，清楚掌握每件事在哪裡。</p></div>
+      <button className="primary" onClick={onOpenAssistant}><Icon name="sparkle" />交付新任務</button>
+    </header>
+    <div className="task-filters">
+      <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>看板 <span>{demoTasks.length}</span></button>
+      {groups.map((group) => <button key={group.state} className={filter === group.state ? "active" : ""} onClick={() => setFilter(group.state)}>{group.title}<span>{demoTasks.filter((task) => task.state === group.state).length}</span></button>)}
+    </div>
+    <div className={`task-board ${filter === "all" ? "" : "single-column"}`}>
+      {groups.filter((group) => filter === "all" || filter === group.state).map((group) => {
+        const tasks = demoTasks.filter((task) => task.state === group.state);
+        return <section className={`task-column ${group.state}`} key={group.state}>
+          <header className="task-column-head"><div><i /><h2>{group.title}</h2><span>{tasks.length}</span></div><p>{group.note}</p></header>
+          <div className="task-column-body">
+            {tasks.map((task) => <button className="board-task-card" key={task.id} onClick={() => onOpenTask(task)}>
+              <div className="board-card-meta"><span className={`task-kind-tag ${task.kind}`}>{kindLabel(task.kind)}</span><Icon name="chevron" size={17} /></div>
+              <h3>{task.title}</h3>
+              <p>{task.current}</p>
+              <TaskProgress task={task} />
+              <div className="board-card-footer"><span>{task.state === "attention" ? task.attentionType : task.meta}</span>{task.state === "attention" && <strong>待處理</strong>}</div>
+            </button>)}
+            <button className="add-task-card" onClick={onOpenAssistant}><span>＋</span>新增任務</button>
+          </div>
+        </section>;
+      })}
+    </div>
+  </div>;
 }
 
 function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLogout: () => Promise<void> }) {
