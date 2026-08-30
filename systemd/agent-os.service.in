@@ -6,7 +6,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory="@CURRENT_ROOT@"
+WorkingDirectory=@CURRENT_ROOT@
 Environment="NODE_ENV=production"
 Environment="AGENT_OS_HOST=@AGENT_OS_HOST@"
 Environment="AGENT_OS_PORT=@AGENT_OS_PORT@"

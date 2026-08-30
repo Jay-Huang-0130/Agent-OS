@@ -215,7 +215,7 @@ if [[ $skip_agent_web -eq 0 ]]; then
     [[ $force_agent_web_update -eq 0 ]] || component_args+=(--force-update)
     bash "$staging_dir/scripts/install-agent-web.sh" "${component_args[@]}"
 else
-    echo "Skipping Agent Web by explicit request."
+    echo "Agent Web installation skipped; any existing installation is left untouched."
 fi
 
 mv -- "$staging_dir" "$release_dir"
