@@ -12,7 +12,7 @@ import type {
 } from "./api/model";
 import { Icon, Logo, type IconName } from "./components/Icon";
 
-type View = "overview" | "tasks" | "outputs" | "conversations" | "system" | "activity" | "settings";
+type View = "overview" | "tasks" | "records" | "system" | "activity" | "settings";
 const client = new AgentClient();
 
 function messageFor(error: unknown): string {
@@ -130,7 +130,7 @@ function Services({ system }: { system: SystemStatus }) {
   return <div className="service-list">{system.services.map((service) => <div className="service-item" key={service.id}><span><Icon name={service.id === "browser" ? "browser" : service.id === "model" ? "model" : "server"} /></span><div><strong>{service.name}</strong><small>{service.detail}</small></div>{service.latencyMs !== undefined && <em>{service.latencyMs} ms</em>}<b className={service.state}><i />{service.state === "healthy" ? "運作中" : service.state === "degraded" ? "需注意" : service.state === "starting" ? "啟動中" : "未啟用"}</b></div>)}</div>;
 }
 
-function SettingsPage({ value, onSave }: { value: Settings; onSave: (settings: Settings) => Promise<void> }) {
+function SettingsPage({ value, onSave, onNavigate }: { value: Settings; onSave: (settings: Settings) => Promise<void>; onNavigate: (view: "system" | "activity") => void }) {
   const [draft, setDraft] = useState(value);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
@@ -139,7 +139,7 @@ function SettingsPage({ value, onSave }: { value: Settings; onSave: (settings: S
     event.preventDefault(); setBusy(true); setNotice("");
     try { await onSave(draft); setNotice("設定已儲存"); } catch (error) { setNotice(messageFor(error)); } finally { setBusy(false); }
   };
-  return <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Preferences</p><h1>裝置設定</h1><p>管理名稱、語言、時區與管理介面外觀。</p></div></header><form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form><section className="phase-card"><span><Icon name="model" /></span><div><p className="eyebrow">Phase 3</p><h2>模型與 OAuth</h2><p>OpenAI、API Key 與本地模型連線會在下一階段加入；Phase 2 不會假裝連線模型。</p></div></section></div>;
+  return <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Preferences</p><h1>設定</h1><p>管理 Agent-OS、裝置與進階系統資訊。</p></div></header><form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form><section className="settings-management"><button onClick={() => onNavigate("system")}><span><Icon name="activity" /></span><div><strong>系統狀態</strong><small>資源、服務與裝置健康度</small></div><Icon name="chevron" /></button><button onClick={() => onNavigate("activity")}><span><Icon name="update" /></span><div><strong>活動紀錄</strong><small>登入、安全與設定變更</small></div><Icon name="chevron" /></button></section><section className="phase-card"><span><Icon name="model" /></span><div><p className="eyebrow">Phase 3</p><h2>模型與 OAuth</h2><p>OpenAI、API Key 與本地模型連線會在下一階段加入；Phase 2 不會假裝連線模型。</p></div></section></div>;
 }
 
 type TaskKind = "once" | "scheduled" | "watch";
@@ -173,16 +173,16 @@ const demoTasks: DemoTask[] = [
     actionLabel: "重新連接",
   },
   {
-    id: "hosting-choice",
-    title: "比較網站監控服務",
-    goal: "找出適合個人使用、能從台灣穩定存取的網站監控方案。",
+    id: "hosting-blocked",
+    title: "取得網站監控服務價格",
+    goal: "取得候選網站監控服務的最新價格並完成比較。",
     kind: "once",
     state: "attention",
-    current: "已整理出 3 個條件相近的方案，需要你決定是否把價格列為第一優先。",
-    meta: "今天 09:42",
+    current: "目標網站持續拒絕自動存取。我已改用公開資料來源並重試 3 次，仍缺少關鍵價格資料。",
+    meta: "已嘗試 3 種方法",
     progress: 82,
-    attentionType: "需要決定",
-    actionLabel: "查看選項",
+    attentionType: "無法繼續",
+    actionLabel: "查看原因",
   },
   {
     id: "vision-roadmap",
@@ -271,9 +271,9 @@ function BriefingModal({ name, onClose }: { name: string; onClose: () => void })
       <div className="briefing-mark"><Icon name="sparkle" size={24} /></div>
       <p className="eyebrow">Your daily briefing</p>
       <h2 id="briefing-title">早安，{name}</h2>
-      <p className="briefing-lede">你離開後，我完成了 2 件事。目前有 2 個項目需要你處理，其餘工作都在正常進行。</p>
-      <div className="briefing-stats"><div><strong>2</strong><span>需要處理</span></div><div><strong>2</strong><span>最新成果</span></div><div><strong>4</strong><span>執行與追蹤中</span></div></div>
-      <div className="briefing-note"><span><Icon name="check" /></span><p><strong>整體狀態良好</strong>所有持續追蹤服務皆準時回報，昨晚沒有重大安全事件。</p></div>
+      <p className="briefing-lede">你離開後，我處理好了 2 件事。有 1 項授權等待你確認，另有 1 件工作在嘗試替代方案後仍無法繼續。</p>
+      <div className="briefing-stats"><div><strong>1</strong><span>等你授權</span></div><div><strong>2</strong><span>已處理好</span></div><div><strong>1</strong><span>需要介入</span></div></div>
+      <div className="briefing-note"><span><Icon name="check" /></span><p><strong>其他工作不需要你操心</strong>另外 4 件事情正在正常處理，我會在完成或真的需要你時再回報。</p></div>
       <button className="primary briefing-action" onClick={onClose}>查看今日事項<Icon name="arrow" /></button>
     </section>
   </div>;
@@ -286,7 +286,7 @@ function TaskDrawer({ task, onClose }: { task: DemoTask; onClose: () => void }) 
       <div className="drawer-body">
         <div className="drawer-title"><p className="eyebrow">Task detail</p><h2 id="task-drawer-title">{task.title}</h2><p>{task.goal}</p></div>
         <section className="current-action"><div className="current-action-head"><span><Icon name={task.state === "attention" ? "warning" : task.state === "completed" ? "check" : "sparkle"} /></span><div><small>目前動作</small><strong>{task.state === "attention" ? "等待你的回覆" : task.state === "completed" ? "工作已交付" : "Agent 正在處理"}</strong></div><em>即時</em></div><p>{task.current}</p><TaskProgress task={task} />{task.actionLabel && <button className="primary drawer-primary">{task.actionLabel}<Icon name="arrow" /></button>}</section>
-        {task.summary && <section className="drawer-section result-summary"><div className="drawer-section-title"><Icon name="check" /><h3>成果摘要</h3></div><p>{task.summary}</p><button className="text-button">開啟完整報告<Icon name="chevron" size={16} /></button></section>}
+        {task.summary && <section className="drawer-section result-summary"><div className="drawer-section-title"><Icon name="check" /><h3>成果彙報</h3></div><div className="report-outcome"><span>達成狀態</span><strong><Icon name="check" size={15} />已完成</strong></div><h4>結果</h4><p>{task.summary}</p><div className="report-findings"><h4>重要發現</h4><ul>{task.id === "ssd-report" ? <><li>Samsung T7 的長時間穩定性最佳</li><li>散熱與供電比峰值速度更重要</li></> : <><li>沒有偵測到異常登入</li><li>短暫斷線均已自行恢復</li></>}</ul></div><div className="report-next"><span>後續</span><p>目前不需要你採取行動。</p></div><button className="text-button">開啟完整報告<Icon name="chevron" size={16} /></button></section>}
         <section className="drawer-section"><div className="drawer-section-title"><Icon name="activity" /><h3>執行紀錄</h3><button>展開全部</button></div><div className="timeline"><div><i /><span><strong>{task.state === "completed" ? "完成任務並整理成果" : "更新目前狀態"}</strong><small>{task.meta}</small></span></div><div><i /><span><strong>確認目標與可用工具</strong><small>今天 08:02</small></span></div><div className="muted"><i /><span><strong>任務由 Agent 自動建立</strong><small>來自助手對話</small></span></div></div></section>
         <section className="drawer-section"><div className="drawer-section-title"><Icon name="storage" /><h3>相關產出</h3></div><div className="artifact"><span><Icon name="storage" /></span><div><strong>任務工作區</strong><small>報告、來源與變更檔案會顯示在這裡</small></div><Icon name="chevron" /></div></section>
       </div>
@@ -316,20 +316,24 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
 
 function OverviewPage({ name, onOpenBriefing, onOpenTask }: { name: string; onOpenBriefing: () => void; onOpenTask: (task: DemoTask) => void }) {
   const [readResults, setReadResults] = useState<string[]>([]);
-  const attention = demoTasks.filter((task) => task.state === "attention");
+  const authorizations = demoTasks.filter((task) => task.state === "attention" && task.attentionType === "需要授權");
+  const blocked = demoTasks.filter((task) => task.state === "attention" && task.attentionType === "無法繼續");
   const results = demoTasks.filter((task) => task.state === "completed" && !readResults.includes(task.id));
   const markRead = (id: string) => setReadResults((current) => [...current, id]);
+  const attentionCard = (task: DemoTask) => <article className="attention-card" key={task.id} onClick={() => onOpenTask(task)}><div className="attention-main"><span className="attention-icon"><Icon name={task.attentionType === "需要授權" ? "key" : "warning"} /></span><div><div className="task-card-kicker"><span>{task.attentionType}</span><small>{task.meta}</small></div><h3>{task.title}</h3><p>{task.current}</p></div></div><div className="attention-actions"><button className="secondary" onClick={(event) => { event.stopPropagation(); onOpenTask(task); }}>查看細節</button><button className="primary" onClick={(event) => event.stopPropagation()}>{task.actionLabel}</button></div></article>;
   return <div className="today-page">
-    <header className="today-header"><div><p className="today-date">8 月 30 日・星期日</p><h1>早安，{name}</h1><p>先處理重要的，其餘交給我。</p></div><button className="briefing-trigger" onClick={onOpenBriefing}><span><Icon name="sparkle" /></span><div><strong>今日摘要已準備好</strong><small>2 個新成果・2 件需要處理</small></div><Icon name="chevron" /></button></header>
-    <section className="today-section attention-section"><div className="today-section-head"><div><span className="section-indicator amber"><Icon name="warning" size={17} /></span><div><h2>需要你處理</h2><p>我已經先完成能做的部分</p></div></div><span className="section-count">{attention.length}</span></div><div className="attention-list">{attention.map((task) => <article className="attention-card" key={task.id} onClick={() => onOpenTask(task)}><div className="attention-main"><span className="attention-icon"><Icon name={task.id === "drive-auth" ? "key" : "warning"} /></span><div><div className="task-card-kicker"><span>{task.attentionType}</span><small>{task.meta}</small></div><h3>{task.title}</h3><p>{task.current}</p></div></div><div className="attention-actions"><button className="secondary" onClick={(event) => { event.stopPropagation(); onOpenTask(task); }}>查看細節</button><button className="primary" onClick={(event) => event.stopPropagation()}>{task.actionLabel}</button></div></article>)}</div></section>
-    <section className="today-section result-section"><div className="today-section-head"><div><span className="section-indicator green"><Icon name="check" size={17} /></span><div><h2>最新成果</h2><p>從你上次離開後完成的工作</p></div></div>{results.length > 0 && <button className="mark-all" onClick={() => setReadResults(demoTasks.filter((task) => task.state === "completed").map((task) => task.id))}>全部標為已讀</button>}</div>{results.length ? <div className="result-list">{results.map((task) => <article className="result-card" key={task.id} onClick={() => { markRead(task.id); onOpenTask(task); }}><div className="result-check"><Icon name="check" /></div><div className="result-content"><div><span>{kindLabel(task.kind)}</span><small>{task.meta}</small></div><h3>{task.title}</h3><p>{task.summary}</p></div><button className="result-open" aria-label="查看成果"><Icon name="arrow" /></button></article>)}</div> : <div className="all-clear"><span><Icon name="check" /></span><h3>最新成果都看過了</h3><p>有新的交付時，我會放在這裡。</p></div>}</section>
+    <header className="today-header"><div><p className="today-date">8 月 30 日・星期日</p><h1>早安，{name}</h1><p>需要你知道的事情，我都整理好了。</p></div><button className="briefing-trigger" onClick={onOpenBriefing}><span><Icon name="sparkle" /></span><div><strong>今日彙報已準備好</strong><small>1 項授權・2 個成果・1 件需要介入</small></div><Icon name="chevron" /></button></header>
+    <div className="quiet-work-status"><span><i /><Icon name="sparkle" size={17} /></span><p><strong>另外 4 件事情正在正常處理</strong>不需要你採取行動，我會在完成或真的需要你時再回報。</p><button onClick={onOpenBriefing}>聽取彙報<Icon name="chevron" size={16} /></button></div>
+    <section className="today-section attention-section"><div className="today-section-head"><div><span className="section-indicator amber"><Icon name="key" size={17} /></span><div><h2>等你授權</h2><p>確認後我會從原進度繼續</p></div></div><span className="section-count">{authorizations.length}</span></div><div className="attention-list">{authorizations.map(attentionCard)}</div></section>
+    <section className="today-section result-section"><div className="today-section-head"><div><span className="section-indicator green"><Icon name="check" size={17} /></span><div><h2>已處理好</h2><p>從你上次離開後完成的工作</p></div></div>{results.length > 0 && <button className="mark-all" onClick={() => setReadResults(demoTasks.filter((task) => task.state === "completed").map((task) => task.id))}>全部標為已讀</button>}</div>{results.length ? <div className="result-list">{results.map((task) => <article className="result-card" key={task.id} onClick={() => { markRead(task.id); onOpenTask(task); }}><div className="result-check"><Icon name="check" /></div><div className="result-content"><div><span>目標已完成</span><small>{task.meta}</small></div><h3>{task.title}</h3><p>{task.summary}</p></div><button className="result-open" aria-label="查看成果彙報"><Icon name="arrow" /></button></article>)}</div> : <div className="all-clear"><span><Icon name="check" /></span><h3>新的成果都看過了</h3><p>有新的交付時，我會放在這裡。</p></div>}</section>
+    <section className="today-section blocked-section"><div className="today-section-head"><div><span className="section-indicator red"><Icon name="warning" size={17} /></span><div><h2>需要你介入</h2><p>我已嘗試其他方法，但目前仍無法繼續</p></div></div><span className="section-count danger">{blocked.length}</span></div><div className="attention-list">{blocked.map(attentionCard)}</div></section>
   </div>;
 }
 
 function TasksPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTask) => void; onOpenAssistant: () => void }) {
   const [filter, setFilter] = useState<"all" | TaskState>("all");
   const groups: Array<{ state: TaskState; title: string; note: string }> = [
-    { state: "attention", title: "需要處理", note: "等待授權、決定或安全確認" },
+    { state: "attention", title: "需要處理", note: "等待授權或真的需要你介入" },
     { state: "running", title: "正在進行", note: "Agent 目前正在執行" },
     { state: "watching", title: "持續追蹤", note: "定期檢查並在有變化時通知" },
     { state: "scheduled", title: "已安排", note: "會在指定時間自動執行" },
@@ -344,8 +348,8 @@ function TasksPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTas
       <button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>看板 <span>{demoTasks.length}</span></button>
       {groups.map((group) => <button key={group.state} className={filter === group.state ? "active" : ""} onClick={() => setFilter(group.state)}>{group.title}<span>{demoTasks.filter((task) => task.state === group.state).length}</span></button>)}
     </div>
-    <div className={`task-board ${filter === "all" ? "" : "single-column"}`}>
-      {groups.filter((group) => filter === "all" || filter === group.state).map((group) => {
+    {filter === "all" ? <div className="task-board">
+      {groups.map((group) => {
         const tasks = demoTasks.filter((task) => task.state === group.state);
         return <section className={`task-column ${group.state}`} key={group.state}>
           <header className="task-column-head"><div><i /><h2>{group.title}</h2><span>{tasks.length}</span></div><p>{group.note}</p></header>
@@ -361,7 +365,12 @@ function TasksPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTas
           </div>
         </section>;
       })}
-    </div>
+    </div> : <section className={`focused-task-view ${filter}`}>
+      {groups.filter((group) => group.state === filter).map((group) => {
+        const tasks = demoTasks.filter((task) => task.state === group.state);
+        return <div key={group.state}><header className="focused-task-head"><div><i /><h2>{group.title}</h2><span>{tasks.length}</span></div><p>{group.note}</p></header><div className="focused-task-list">{tasks.map((task) => <button key={task.id} className="focused-task-row" onClick={() => onOpenTask(task)}><span className={`task-type-icon ${task.kind}`}><Icon name={task.kind === "watch" ? "eye" : task.kind === "scheduled" ? "update" : task.state === "completed" ? "check" : "sparkle"} /></span><div className="focused-task-copy"><div><span className={`task-kind-tag ${task.kind}`}>{kindLabel(task.kind)}</span><small>{task.state === "attention" ? task.attentionType : task.meta}</small></div><h3>{task.title}</h3><p>{task.current}</p></div><TaskProgress task={task} /><Icon name="chevron" /></button>)}</div></div>;
+      })}
+    </section>}
   </div>;
 }
 
@@ -388,11 +397,11 @@ const demoNotifications: NotificationItem[] = [
   { id: "notice-system", title: "服務已自行恢復", detail: "Gateway 曾短暫失去網路連線，目前所有服務正常。", kind: "system", createdAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(), read: true },
 ];
 
-function OutputsPage({ onOpenTask }: { onOpenTask: (task: DemoTask) => void }) {
+function OutputsPage({ onOpenTask, embedded = false }: { onOpenTask: (task: DemoTask) => void; embedded?: boolean }) {
   const [filter, setFilter] = useState<"all" | OutputRecord["kind"]>("all");
   const records = demoOutputs.filter((output) => filter === "all" || output.kind === filter);
   const labels: Record<OutputRecord["kind"], string> = { report: "報告", file: "檔案", research: "研究整理" };
-  return <div className="library-page"><header className="library-header"><div><p className="eyebrow">Outputs</p><h1>成果中心</h1><p>所有完成的報告、檔案與研究資料都集中在這裡。</p></div><button className="secondary"><Icon name="storage" />開啟工作區</button></header><div className="library-toolbar"><div className="task-filters"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部 <span>{demoOutputs.length}</span></button>{(["report", "file", "research"] as const).map((kind) => <button key={kind} className={filter === kind ? "active" : ""} onClick={() => setFilter(kind)}>{labels[kind]} <span>{demoOutputs.filter((output) => output.kind === kind).length}</span></button>)}</div><label className="library-search"><Icon name="eye" size={17} /><input placeholder="搜尋成果…" /></label></div><div className="output-grid">{records.map((output) => <article className="output-card" key={output.id}><div className="output-card-head"><span className={`output-icon ${output.kind}`}><Icon name={output.kind === "report" ? "activity" : output.kind === "file" ? "storage" : "globe"} /></span><div><span>{labels[output.kind]}</span><small>{output.createdAt}</small></div><button className="icon-only" aria-label="更多操作"><Icon name="settings" size={17} /></button></div><h2>{output.title}</h2><p>{output.summary}</p><div className="output-files">{output.files.map((file) => <span key={file}><Icon name="storage" size={14} />{file}</span>)}</div><footer><span>由 Agent-OS 自動整理</span><button onClick={() => { const task = demoTasks.find((item) => item.id === output.taskId); if (task) onOpenTask(task); }}>查看成果<Icon name="arrow" size={16} /></button></footer></article>)}</div></div>;
+  return <div className="library-page">{!embedded && <header className="library-header"><div><p className="eyebrow">Outputs</p><h1>成果中心</h1><p>所有完成的報告、檔案與研究資料都集中在這裡。</p></div><button className="secondary"><Icon name="storage" />開啟工作區</button></header>}<div className="library-toolbar"><div className="task-filters"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部 <span>{demoOutputs.length}</span></button>{(["report", "file", "research"] as const).map((kind) => <button key={kind} className={filter === kind ? "active" : ""} onClick={() => setFilter(kind)}>{labels[kind]} <span>{demoOutputs.filter((output) => output.kind === kind).length}</span></button>)}</div><label className="library-search"><Icon name="eye" size={17} /><input placeholder="搜尋成果…" /></label></div><div className="output-grid">{records.map((output) => <article className="output-card" key={output.id}><div className="output-card-head"><span className={`output-icon ${output.kind}`}><Icon name={output.kind === "report" ? "activity" : output.kind === "file" ? "storage" : "globe"} /></span><div><span>{labels[output.kind]}</span><small>{output.createdAt}</small></div><button className="icon-only" aria-label="更多操作"><Icon name="settings" size={17} /></button></div><h2>{output.title}</h2><p>{output.summary}</p><div className="output-files">{output.files.map((file) => <span key={file}><Icon name="storage" size={14} />{file}</span>)}</div><footer><span>由 Agent-OS 自動整理</span><button onClick={() => { const task = demoTasks.find((item) => item.id === output.taskId); if (task) onOpenTask(task); }}>查看成果<Icon name="arrow" size={16} /></button></footer></article>)}</div></div>;
 }
 
 type Conversation = { id: string; title: string; preview: string; time: string; messages: Array<{ role: "user" | "agent"; text: string; task?: string }> };
@@ -402,10 +411,15 @@ const demoConversations: Conversation[] = [
   { id: "conversation-health", title: "服務健康度追蹤", preview: "持續追蹤中，所有服務正常。", time: "昨天", messages: [{ role: "user", text: "幫我持續注意 Agent-OS 有沒有斷線。" }, { role: "agent", text: "已開始持續追蹤 Gateway、網路與儲存空間。有異常時我會直接通知你。", task: "追蹤 Agent-OS 服務健康度" }] },
 ];
 
-function ConversationsPage({ onOpenAssistant }: { onOpenAssistant: () => void }) {
+function ConversationsPage({ onOpenAssistant, embedded = false }: { onOpenAssistant: () => void; embedded?: boolean }) {
   const [selectedId, setSelectedId] = useState(demoConversations[0].id);
   const conversation = demoConversations.find((item) => item.id === selectedId) ?? demoConversations[0];
-  return <div className="conversations-page"><header className="library-header"><div><p className="eyebrow">Conversations</p><h1>對話紀錄</h1><p>回顧交付過的指令、補充內容與 Agent 的回覆。</p></div><button className="primary" onClick={onOpenAssistant}><Icon name="sparkle" />開始新對話</button></header><div className="conversation-layout"><aside className="conversation-list"><label className="conversation-search"><Icon name="eye" size={17} /><input placeholder="搜尋對話…" /></label><div>{demoConversations.map((item) => <button key={item.id} className={selectedId === item.id ? "active" : ""} onClick={() => setSelectedId(item.id)}><span className="conversation-avatar"><Icon name="sparkle" size={17} /></span><span><strong>{item.title}</strong><small>{item.preview}</small></span><time>{item.time}</time></button>)}</div></aside><section className="conversation-thread"><header><div><h2>{conversation.title}</h2><p>與 Agent-OS 的歷史對話</p></div><button className="icon-only"><Icon name="settings" size={17} /></button></header><div className="message-history">{conversation.messages.map((message, index) => <div className={`history-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "agent" ? <Icon name="sparkle" size={17} /> : "JA"}</span><div><small>{message.role === "agent" ? "Agent-OS" : "你"}</small><p>{message.text}</p>{message.task && <button className="conversation-task-link"><Icon name="check" size={16} /><span><strong>已建立任務</strong>{message.task}</span><Icon name="chevron" size={16} /></button>}</div></div>)}</div><footer><button onClick={onOpenAssistant}><Icon name="sparkle" />繼續這段對話</button></footer></section></div></div>;
+  return <div className="conversations-page">{!embedded && <header className="library-header"><div><p className="eyebrow">Conversations</p><h1>對話紀錄</h1><p>回顧交付過的指令、補充內容與 Agent 的回覆。</p></div><button className="primary" onClick={onOpenAssistant}><Icon name="sparkle" />開始新對話</button></header>}<div className="conversation-layout"><aside className="conversation-list"><label className="conversation-search"><Icon name="eye" size={17} /><input placeholder="搜尋對話…" /></label><div>{demoConversations.map((item) => <button key={item.id} className={selectedId === item.id ? "active" : ""} onClick={() => setSelectedId(item.id)}><span className="conversation-avatar"><Icon name="sparkle" size={17} /></span><span><strong>{item.title}</strong><small>{item.preview}</small></span><time>{item.time}</time></button>)}</div></aside><section className="conversation-thread"><header><div><h2>{conversation.title}</h2><p>與 Agent-OS 的歷史對話</p></div><button className="icon-only"><Icon name="settings" size={17} /></button></header><div className="message-history">{conversation.messages.map((message, index) => <div className={`history-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "agent" ? <Icon name="sparkle" size={17} /> : "JA"}</span><div><small>{message.role === "agent" ? "Agent-OS" : "你"}</small><p>{message.text}</p>{message.task && <button className="conversation-task-link"><Icon name="check" size={16} /><span><strong>已建立任務</strong>{message.task}</span><Icon name="chevron" size={16} /></button>}</div></div>)}</div><footer><button onClick={onOpenAssistant}><Icon name="sparkle" />繼續這段對話</button></footer></section></div></div>;
+}
+
+function RecordsPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTask) => void; onOpenAssistant: () => void }) {
+  const [tab, setTab] = useState<"outputs" | "conversations">("outputs");
+  return <div className="records-page"><header className="library-header"><div><p className="eyebrow">Records</p><h1>紀錄</h1><p>需要回頭查看的成果與對話，都收在同一個地方。</p></div></header><div className="record-tabs"><button className={tab === "outputs" ? "active" : ""} onClick={() => setTab("outputs")}><Icon name="storage" />成果<span>{demoOutputs.length}</span></button><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}><Icon name="model" />對話<span>{demoConversations.length}</span></button></div>{tab === "outputs" ? <OutputsPage embedded onOpenTask={onOpenTask} /> : <ConversationsPage embedded onOpenAssistant={onOpenAssistant} />}</div>;
 }
 
 function NotificationCenter({ items, onClose, onRead, onReadAll, onOpenTask }: { items: NotificationItem[]; onClose: () => void; onRead: (id: string) => void; onReadAll: () => void; onOpenTask: (task: DemoTask) => void }) {
@@ -461,15 +475,13 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
 
   const nav = useMemo(() => [
     ["overview", "今日", "dashboard"], ["tasks", "任務", "check"],
-    ["outputs", "成果", "storage"], ["conversations", "對話", "model"],
-    ["system", "系統", "activity"], ["activity", "活動", "update"],
-    ["settings", "設定", "settings"],
+    ["records", "紀錄", "storage"], ["settings", "設定", "settings"],
   ] as Array<[View, string, IconName]>, []);
 
   if (!snapshot || !settings) return <Loading />;
   const system = snapshot.system;
   const name = bootstrap.session.user?.displayName ?? "Owner";
-  const pageTitles: Record<View, string> = { overview: "今日", tasks: "所有任務", outputs: "成果中心", conversations: "對話紀錄", system: "系統狀態", activity: "活動紀錄", settings: "裝置設定" };
+  const pageTitles: Record<View, string> = { overview: "今日", tasks: "所有任務", records: "紀錄", system: "系統狀態", activity: "活動紀錄", settings: "設定" };
   const unreadCount = notifications.filter((item) => !item.read).length;
 
   return <div className="app-shell polished-shell">
@@ -482,17 +494,16 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     {mobileNav && <button className="scrim" aria-label="關閉選單" onClick={() => setMobileNav(false)} />}
     <div className="main-column">
       <header className="topbar"><button className="icon-only menu-button" onClick={() => setMobileNav(true)}><Icon name="menu" /></button><div className="topbar-title"><strong>{pageTitles[view]}</strong><small>Agent-OS・{settings.deviceName}</small></div><div className={`connection ${connection}`}><i />{connection === "online" ? "即時連線" : connection === "reconnecting" ? "重新連線" : "連線中"}</div><button className="notification-button" onClick={() => setNotificationOpen(true)} aria-label="開啟通知中心"><Icon name="warning" size={18} />{unreadCount > 0 && <span>{unreadCount}</span>}</button><span className="topbar-avatar avatar">{bootstrap.session.user?.initials ?? "AO"}</span></header>
-      <main className={`content ${["overview", "tasks", "outputs", "conversations"].includes(view) ? "workspace-content" : ""}`}>
+      <main className={`content ${["overview", "tasks", "records"].includes(view) ? "workspace-content" : ""}`}>
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
         {view === "overview" && <OverviewPage name={name} onOpenBriefing={() => setBriefingOpen(true)} onOpenTask={setSelectedTask} />}
         {view === "tasks" && <TasksPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
-        {view === "outputs" && <OutputsPage onOpenTask={setSelectedTask} />}
-        {view === "conversations" && <ConversationsPage onOpenAssistant={() => setAssistantOpen(true)} />}
+        {view === "records" && <RecordsPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}
-        {view === "settings" && <SettingsPage value={settings} onSave={async (next) => setSettings(await client.updateSettings(next))} />}
+        {view === "settings" && <SettingsPage value={settings} onSave={async (next) => setSettings(await client.updateSettings(next))} onNavigate={setView} />}
       </main>
-      {view !== "conversations" && <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>}
+      <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>
     </div>
     {briefingOpen && view === "overview" && <BriefingModal name={name} onClose={() => setBriefingOpen(false)} />}
     {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} />}

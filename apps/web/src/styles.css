@@ -216,6 +216,13 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .phase-card { display: flex; gap: 16px; padding: 23px; border-radius: 18px; }
 .phase-card h2 { margin: 0 0 5px; font-size: 17px; }
 .phase-card p:last-child { margin: 0; color: var(--muted); font-size: 11px; }
+.settings-management { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.settings-management > button { display: grid; grid-template-columns: 42px 1fr 18px; align-items: center; gap: 13px; padding: 18px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--panel); text-align: left; box-shadow: 0 6px 24px rgba(30, 49, 39, .035); }
+.settings-management > button > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: var(--green); background: var(--green-soft); }
+.settings-management > button > div { display: grid; gap: 4px; }
+.settings-management strong { font-size: 13px; }
+.settings-management small { color: var(--muted); font-size: 11px; }
+.settings-management > button > svg { color: var(--muted); }
 .chat-dock { position: fixed; z-index: 15; left: 246px; right: 0; bottom: 0; padding: 18px clamp(20px, 4vw, 52px); background: linear-gradient(transparent, color-mix(in srgb, var(--panel) 96%, transparent) 28%); pointer-events: none; }
 .chat-dock > div { max-width: 970px; height: 58px; margin: auto; display: flex; align-items: center; gap: 11px; padding: 7px 8px 7px 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: 0 15px 50px rgba(21, 44, 34, .16); pointer-events: auto; }
 .chat-dock svg { color: var(--green); }
@@ -266,6 +273,7 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .setting-row { grid-template-columns: 1fr; }
   .setting-row > div { grid-template-columns: 1fr; }
   .setting-row > div > p { grid-column: auto; }
+  .settings-management { grid-template-columns: 1fr; }
   .chat-dock { left: 0; padding: 15px 13px; }
   .chat-dock span { display: none; }
 }
@@ -668,6 +676,13 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 
 /* Outputs, conversation history and real-time notification surfaces */
 .library-page, .conversations-page { display: grid; gap: 28px; animation: page-enter .35s ease both; }
+.records-page { display: grid; gap: 24px; animation: page-enter .35s ease both; }
+.record-tabs { width: max-content; display: flex; gap: 5px; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.record-tabs button { min-width: 110px; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 12px; font-weight: 700; }
+.record-tabs button.active { color: var(--green); background: var(--panel); box-shadow: 0 3px 13px rgba(26, 45, 35, .07); }
+.record-tabs span { min-width: 19px; height: 19px; display: grid; place-items: center; padding: 0 5px; border-radius: 20px; color: var(--muted); background: var(--soft); font-size: 10px; }
+.records-page > .library-page, .records-page > .conversations-page { animation: none; }
+.records-page .conversation-thread > footer { display: none; }
 .library-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .library-header h1 { margin: 0; font-size: clamp(32px, 4vw, 46px); line-height: 1; letter-spacing: -.045em; }
 .library-header > div > p:last-child { margin: 11px 0 0; color: var(--muted); font-size: 15px; }
@@ -777,6 +792,69 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .message-history { max-height: 520px; padding: 22px 17px; }
   .notification-center { top: 8px; right: 8px; width: calc(100% - 16px); max-height: calc(100vh - 16px); }
   .notification-toast { top: 78px; right: 12px; width: calc(100% - 24px); }
+}
+
+/* Executive briefing and focused task category */
+.quiet-work-status { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 12px; margin-top: -17px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--soft) 58%, var(--panel)); }
+.quiet-work-status > span { position: relative; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; color: var(--green); background: var(--green-soft); }
+.quiet-work-status > span i { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border: 2px solid var(--panel); border-radius: 50%; background: #2aaa6e; }
+.quiet-work-status p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.quiet-work-status strong { display: block; margin-bottom: 2px; color: var(--ink); font-size: 13px; }
+.quiet-work-status button { display: flex; align-items: center; gap: 3px; padding: 7px 9px; border: 0; color: var(--green); background: transparent; font-size: 11px; font-weight: 720; }
+.section-indicator.red { color: #b44e48; background: #fae6e4; }
+.section-count.danger { color: #a6423c; background: #f9e4e2; }
+.blocked-section .attention-card { border-color: #ecd4d1; background: color-mix(in srgb, var(--panel) 96%, #fff0ef); }
+.blocked-section .attention-icon { color: #b44e48; background: #fae6e4; }
+.blocked-section .task-card-kicker span { color: #ae4943; }
+
+.result-summary h4 { margin: 17px 0 7px; font-size: 12px; }
+.report-outcome { display: flex; align-items: center; justify-content: space-between; margin: 3px 0 18px; padding: 11px 12px; border-radius: 11px; background: var(--soft); }
+.report-outcome > span { color: var(--muted); font-size: 11px; }
+.report-outcome strong { display: flex; align-items: center; gap: 5px; color: var(--green); font-size: 12px; }
+.report-findings { margin-top: 18px; padding-top: 1px; border-top: 1px solid var(--line); }
+.report-findings ul { display: grid; gap: 7px; margin: 0; padding-left: 19px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.report-findings li::marker { color: var(--green); }
+.report-next { display: grid; grid-template-columns: 42px 1fr; gap: 9px; margin-top: 18px; padding: 11px 12px; border-radius: 11px; background: var(--soft); }
+.report-next span { color: var(--green); font-size: 11px; font-weight: 750; }
+.report-next p { margin: 0; color: var(--muted); font-size: 12px; }
+
+.focused-task-view { margin-top: -12px; animation: page-enter .25s ease both; }
+.focused-task-view > div { display: grid; gap: 13px; }
+.focused-task-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; }
+.focused-task-head > div { display: flex; align-items: center; gap: 9px; }
+.focused-task-head i { width: 8px; height: 8px; border-radius: 50%; background: #b87b2b; }
+.focused-task-view.running .focused-task-head i { background: #299a67; box-shadow: 0 0 0 4px #299a6717; }
+.focused-task-view.watching .focused-task-head i { background: #3880a8; }
+.focused-task-view.scheduled .focused-task-head i { background: #786cae; }
+.focused-task-view.completed .focused-task-head i { background: #829088; }
+.focused-task-head h2 { margin: 0; font-size: 17px; }
+.focused-task-head span { min-width: 24px; height: 24px; display: grid; place-items: center; padding: 0 7px; border-radius: 20px; color: var(--muted); background: var(--soft); font-size: 11px; }
+.focused-task-head p { margin: 0; color: var(--muted); font-size: 12px; }
+.focused-task-list { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.focused-task-row { width: 100%; min-height: 108px; display: grid; grid-template-columns: 42px minmax(260px, 1fr) minmax(160px, 240px) 18px; align-items: center; gap: 15px; padding: 16px 18px; border: 0; border-top: 1px solid var(--line); color: var(--ink); background: transparent; text-align: left; transition: background .18s ease; }
+.focused-task-row:first-child { border-top: 0; }
+.focused-task-row:hover { background: color-mix(in srgb, var(--soft) 52%, var(--panel)); }
+.focused-task-copy { min-width: 0; }
+.focused-task-copy > div { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.focused-task-copy small { color: var(--muted); font-size: 11px; }
+.focused-task-copy h3 { margin: 0; font-size: 15px; letter-spacing: -.01em; }
+.focused-task-copy p { display: -webkit-box; overflow: hidden; margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.focused-task-row > svg { color: var(--muted); }
+
+:root[data-theme="dark"] .section-indicator.red,
+:root[data-theme="dark"] .blocked-section .attention-icon { color: #e38b84; background: #412623; }
+
+@media (max-width: 760px) {
+  .quiet-work-status { grid-template-columns: 38px 1fr; }
+  .quiet-work-status button { grid-column: 2; justify-self: start; padding: 0; }
+  .focused-task-head { align-items: flex-start; }
+  .focused-task-head p { max-width: 180px; text-align: right; }
+  .focused-task-row { grid-template-columns: 40px minmax(0, 1fr) 18px; gap: 11px; padding: 15px; }
+  .focused-task-row > .task-progress,
+  .focused-task-row > .task-health,
+  .focused-task-row > .task-schedule { grid-column: 2 / -1; }
+  .focused-task-row > svg { grid-column: 3; grid-row: 1; }
+  .focused-task-copy p { -webkit-line-clamp: 2; }
 }
 
 @media (prefers-reduced-motion: reduce) {
