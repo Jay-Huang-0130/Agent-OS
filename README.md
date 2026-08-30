@@ -5,7 +5,18 @@
 
 Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接受委託、持續工作、使用不同裝置能力，並對結果負責的私人 AI 作業層。
 
-專案目前位於 foundation／vision 階段。第一個正式加入的基礎能力是 [Agent Web](https://github.com/Jay-Huang-0130/Agent-Web)：在沒有 GUI 的 Raspberry Pi 上提供 24 小時運行、保存 Cookie 與登入 Session、可由人類從內網觀看及操作的 Chromium。
+專案目前已完成 Phase 0–2：可攜式基礎架構、隔離式安裝器、Gateway API 與 Web 管理介面。聊天、工具調用、模型提供者與任務佇列會從 Phase 3 開始接入。
+
+## Phase 0–2 已完成
+
+- Agent-OS 自帶固定版本的 Node.js 24 LTS，不安裝系統 Node、不執行全域 `npm install`。
+- 正式支援 64-bit Raspberry Pi OS／Debian／Ubuntu 的 ARM64 與 x64。
+- 使用 systemd user service 常駐；程式、狀態、設定與 runtime 都位於使用者的 XDG 目錄。
+- Web 管理介面支援首次配對、安全登入、系統資源、服務狀態、活動紀錄、裝置設定與即時事件。
+- Gateway 使用本機 SQLite，Session Cookie 為 HttpOnly／SameSite，寫入操作有 CSRF 與同源檢查。
+- Agent Web 是選用的瀏覽器能力，不是 Phase 2 的必要依賴。
+
+完整說明與開發流程請見 [Phase 0–2 實作說明](docs/PHASE-0-2.md)。
 
 ## 為什麼 Agent-OS 需要 Agent Web
 
@@ -30,7 +41,7 @@ Agent-OS
 
 ## 一條指令安裝
 
-目前 foundation 安裝器支援 Agent Web 相同的目標環境：Raspberry Pi 5、ARM64、Debian 13 Trixie。
+正式支援 Raspberry Pi OS、Debian 與 Ubuntu 的 64-bit ARM64／x86_64 Linux；Raspberry Pi 5 請使用 64-bit 作業系統。
 
 以一般登入使用者執行，不要先切換成 root：
 
@@ -40,45 +51,64 @@ curl -fsSL https://raw.githubusercontent.com/Jay-Huang-0130/Agent-OS/main/bootst
 
 安裝流程：
 
-1. 下載或更新 Agent-OS 到 `~/.local/share/agent-os/source`。
-2. 安裝最小必要工具。
-3. 執行 Agent Web 能力探測。
-4. 若 Agent Web 已安裝且 `READY=true`，直接沿用。
-5. 若缺少或不健康，自動下載、安裝或修復 Agent Web。
-6. 使用 `agent-webctl info` 驗證瀏覽器子系統。
-7. 安裝 `agent-osctl` 管理入口。
+1. 下載固定的 Agent-OS release/source archive。
+2. 偵測 Linux 架構、64-bit userspace 與 glibc 版本。
+3. 下載固定的官方 Node.js 24 LTS ARM64／x64 runtime，並驗證內嵌 SHA-256。
+4. 在 Agent-OS 自己的 staging 目錄建置前後端，不修改系統 Node/npm/Python。
+5. 建立本機 TLS 憑證、首次配對碼與 systemd user service。
+6. 以 atomic symlink 啟用 release，失敗時保留前一版。
+7. 顯示 `https://IP:8787`、配對碼與憑證指紋；之後所有設定都在瀏覽器完成。
 
-第一次全自動安裝若沒有提供密碼檔，會產生 16 字元隨機 Agent Web 網頁密碼並在終端顯示一次。請立即保存，之後可以執行 `agent-osctl browser password` 修改。
+第一次用其他裝置開啟 `https://樹莓派IP:8787` 時，瀏覽器會提示自簽憑證；確認指紋後即可用終端顯示的配對碼建立管理密碼。
+
+安裝器可能會為 `systemd user lingering` 要求一次 sudo 授權，確保 SSH 登出後服務仍持續運行；它不會用 sudo 安裝 Node 或 npm 套件。
+
+## 更新
+
+安裝與更新使用同一條指令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jay-Huang-0130/Agent-OS/main/bootstrap.sh | bash
+```
+
+更新會建立全新的 release 目錄，再原子切換 `current` symlink 並重新啟動服務；不會把新檔案覆蓋混入舊程式碼。SQLite、管理密碼、設定、TLS 與選用元件都位於 release 之外，因此會保留。上一個 release 也不會刪除，啟動失敗時安裝器會自動切回。
+
+已自訂的 IP 綁定位址與 port 會沿用；若這次要變更，可在指令前提供環境變數，例如：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jay-Huang-0130/Agent-OS/main/bootstrap.sh | AGENT_OS_PORT=9000 bash
+```
+
+`main` 適合目前開發階段。正式發布後應改用固定 tag 並提供 SHA-256，避免每次取得不同內容。
 
 ## 安裝後檢查
 
 ```bash
 agent-osctl doctor
-agent-osctl browser info
-agent-osctl browser url
+agent-osctl status
+agent-osctl pairing
+agent-osctl logs
 ```
 
 正常狀態包含：
 
 ```text
-READY=true
-BROWSER_SERVICE=active
-NOVNC_SERVICE=active
-WEB_SERVICE=active
-HTTPS_AUTH_CHECK=401
+[PASS] Managed runtime: v24.20.0
+[PASS] Agent-OS service is active.
+[PASS] Gateway health endpoint responds.
 ```
 
-`401` 代表 HTTPS 與密碼驗證正常，不是故障。
+如果尚未完成首次設定，doctor 也會提示目前正在等待配對。Agent Web 未安裝時只會顯示資訊，不會把核心判定為故障。
 
 ## 自訂 Agent Web 密碼
 
-若不想使用自動產生的密碼，先建立只有自己能讀取的密碼檔並匯出路徑：
+只有執行 `--with-agent-web` 時才需要這個設定。若不想使用 Agent Web 自動產生的密碼，先建立只有自己能讀取的密碼檔並匯出路徑：
 
 ```bash
 umask 077
 printf '%s\n' 'your-password' > "$HOME/agent-web-password"
 export AGENT_OS_AGENT_WEB_PASSWORD_FILE="$HOME/agent-web-password"
-curl -fsSL https://raw.githubusercontent.com/Jay-Huang-0130/Agent-OS/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Jay-Huang-0130/Agent-OS/main/bootstrap.sh | bash -s -- --with-agent-web
 unset AGENT_OS_AGENT_WEB_PASSWORD_FILE
 rm -f "$HOME/agent-web-password"
 ```
@@ -89,6 +119,12 @@ rm -f "$HOME/agent-web-password"
 
 ```bash
 agent-osctl doctor
+agent-osctl status
+agent-osctl start
+agent-osctl stop
+agent-osctl restart
+agent-osctl logs
+agent-osctl pairing
 agent-osctl browser info
 agent-osctl browser status
 agent-osctl browser url
@@ -96,15 +132,17 @@ agent-osctl browser update
 agent-osctl browser password
 ```
 
-目前 `agent-osctl` 只管理 foundation 與瀏覽器元件；Goal Engine、Agent Runtime、Device Mesh 等仍是後續階段，不會在文件中假裝已經完成。
+目前 `agent-osctl` 管理 Gateway、Web 介面與選用的瀏覽器元件；Goal Engine、Agent Runtime、模型與 Device Mesh 等仍是後續階段。
 
 ## 目前人類操作與未來 Agent 操作
 
 目前已完成：
 
 ```text
-人類瀏覽器 -> HTTPS/noVNC -> Agent Web Chromium
+人類瀏覽器 -> HTTPS/WSS -> Agent-OS Web 管理介面
 ```
+
+選用 Agent Web 後，另外提供 `HTTPS/noVNC -> Chromium` 的人工操作入口。
 
 未來預計：
 
@@ -121,34 +159,37 @@ noVNC 負責觀看、登入、MFA 和人工接管；Agent Adapter 負責 Snapsho
 ## 專案資料位置
 
 ```text
-~/.local/share/agent-os/source              Agent-OS 原始碼
-~/.local/state/agent-os/components          元件驗證狀態
-~/.local/share/agent-web/source             Agent Web 原始碼
-/var/lib/agent-web                          Chromium Profile 與下載
-/etc/agent-web                              Agent Web 驗證與設定
+~/.local/share/agent-os/runtimes             Agent-OS 私有 Node.js
+~/.local/share/agent-os/releases             不可變 release
+~/.local/share/agent-os/current              目前啟用的 release symlink
+~/.local/state/agent-os                      SQLite、TLS、配對碼與快取
+~/.config/agent-os                           runtime 設定與 user service
+~/.local/bin/agent-osctl                     管理指令
 ```
 
-Agent-OS 不會複製 Agent Web 原始碼到自己的倉庫，也不會建立第二份 Chromium Profile。
+如果選裝 Agent Web，它仍維持自己的來源、服務與 Chromium Profile；Agent-OS 不會建立第二份 Profile。
 
 ## 開發與驗證
 
 ```bash
 git clone https://github.com/Jay-Huang-0130/Agent-OS.git
 cd Agent-OS
-./validate.sh
-./install.sh
+bash ./validate.sh
+bash ./install.sh
 ```
 
-略過瀏覽器元件或強制更新：
+安裝 Web 管理介面，或另外加入選用的 Agent Web 瀏覽器元件：
 
 ```bash
-./install.sh --skip-agent-web
-./install.sh --force-agent-web-update
+bash ./install.sh
+bash ./install.sh --with-agent-web
+bash ./install.sh --force-agent-web-update
 ```
 
 ## 文件
 
 - [VISION.md](VISION.md)：Agent-OS 的完整產品願景。
+- [Phase 0–2 實作說明](docs/PHASE-0-2.md)：支援平台、隔離方式、API、安全與安裝流程。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
 
 ## 專案狀態

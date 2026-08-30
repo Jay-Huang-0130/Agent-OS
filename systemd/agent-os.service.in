@@ -1,0 +1,32 @@
+[Unit]
+Description=Agent-OS private AI assistant
+Documentation=https://github.com/Jay-Huang-0130/Agent-OS
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory="@CURRENT_ROOT@"
+Environment="NODE_ENV=production"
+Environment="AGENT_OS_HOST=@AGENT_OS_HOST@"
+Environment="AGENT_OS_PORT=@AGENT_OS_PORT@"
+Environment="AGENT_OS_DATA_DIR=@DATA_ROOT@"
+Environment="AGENT_OS_STATE_DIR=@STATE_ROOT@"
+Environment="AGENT_OS_CONFIG_DIR=@CONFIG_ROOT@"
+Environment="AGENT_OS_TLS_KEY_FILE=@TLS_KEY_FILE@"
+Environment="AGENT_OS_TLS_CERT_FILE=@TLS_CERT_FILE@"
+ExecStart="@NODE_BINARY@" "@CURRENT_ROOT@/@SERVER_ENTRY@"
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target

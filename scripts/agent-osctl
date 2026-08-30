@@ -6,7 +6,13 @@ usage() {
 Usage: agent-osctl COMMAND
 
 Commands:
-  doctor             Check Agent-OS foundation and required components
+  status             Show the Agent-OS user service status
+  start              Start Agent-OS
+  stop               Stop Agent-OS
+  restart            Restart Agent-OS
+  logs               Follow Agent-OS logs
+  pairing            Print the first-time pairing code
+  doctor             Check the runtime, service and Web endpoint
   browser info       Print Agent Web machine-readable capabilities
   browser status     Show Agent Web service status
   browser url        Print the human noVNC URL
@@ -18,23 +24,63 @@ EOF
 doctor() {
     echo "Agent-OS doctor"
     echo "==============="
-    if ! command -v agent-webctl >/dev/null 2>&1; then
-        echo "[FAIL] Agent Web controller is not installed."
-        return 1
-    fi
-
-    info=$(agent-webctl info)
-    printf '%s\n' "$info"
-    if printf '%s\n' "$info" | grep -qx 'READY=true'; then
-        echo "[PASS] Browser subsystem is ready."
+    failed=0
+    data_root=${AGENT_OS_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/agent-os}
+    state_root=${AGENT_OS_STATE_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-os}
+    node_binary=$data_root/runtimes/node/current/bin/node
+    if [[ -x "$node_binary" ]]; then
+        echo "[PASS] Managed runtime: $($node_binary --version)"
     else
-        echo "[FAIL] Browser subsystem is not ready."
-        return 1
+        echo "[FAIL] Managed Node.js runtime is missing."
+        failed=1
     fi
+    if systemctl --user is-active --quiet agent-os.service; then
+        echo "[PASS] Agent-OS service is active."
+    else
+        echo "[FAIL] Agent-OS service is not active."
+        failed=1
+    fi
+    port=${AGENT_OS_PORT:-8787}
+    if curl --fail --silent --insecure "https://127.0.0.1:${port}/healthz" >/dev/null 2>&1 || \
+       curl --fail --silent "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+        echo "[PASS] Gateway health endpoint responds."
+    else
+        echo "[FAIL] Gateway health endpoint does not respond."
+        failed=1
+    fi
+    if [[ -s "$state_root/pairing-code" ]]; then
+        echo "[INFO] First-time setup is waiting for the pairing code."
+    fi
+    if command -v agent-webctl >/dev/null 2>&1; then
+        if agent-webctl info | grep -qx 'READY=true'; then
+            echo "[PASS] Optional Agent Web browser is ready."
+        else
+            echo "[WARN] Optional Agent Web browser is installed but not ready."
+        fi
+    else
+        echo "[INFO] Optional Agent Web browser is not installed."
+    fi
+    return "$failed"
 }
 
-command_name=${1:-doctor}
+command_name=${1:-status}
 case "$command_name" in
+    status|start|stop|restart)
+        exec systemctl --user "$command_name" agent-os.service
+        ;;
+    logs)
+        exec journalctl --user -u agent-os.service -f
+        ;;
+    pairing)
+        state_root=${AGENT_OS_STATE_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/agent-os}
+        if [[ -s "$state_root/pairing-code" ]]; then
+            tr -d '\r\n' <"$state_root/pairing-code"
+            printf '\n'
+        else
+            echo "No pairing code is active; setup may already be complete." >&2
+            exit 66
+        fi
+        ;;
     doctor)
         doctor
         ;;
@@ -70,4 +116,3 @@ case "$command_name" in
         exit 64
         ;;
 esac
-
