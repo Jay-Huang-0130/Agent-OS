@@ -77,6 +77,7 @@ GET  /api/v1/settings
 PUT  /api/v1/settings
 GET  /api/v1/providers/openai
 POST /api/v1/providers/openai/oauth/start
+POST /api/v1/providers/openai/oauth/complete
 POST /api/v1/providers/openai/oauth/cancel
 POST /api/v1/providers/openai/logout
 WS   /api/v1/events

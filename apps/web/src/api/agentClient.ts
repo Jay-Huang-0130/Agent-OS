@@ -5,7 +5,7 @@ import type {
   ConnectionState,
   MetaResponse,
   OpenAIConnection,
-  OpenAIDeviceLogin,
+  OpenAIOAuthLogin,
   SessionResponse,
   Settings,
   SetupInput,
@@ -87,8 +87,18 @@ export class AgentClient {
     return this.request<OpenAIConnection>("/api/v1/providers/openai");
   }
 
-  startOpenAIOAuth(): Promise<OpenAIDeviceLogin> {
-    return this.request<OpenAIDeviceLogin>("/api/v1/providers/openai/oauth/start", { method: "POST" }, true);
+  startOpenAIOAuth(method: "browser" | "device" = "browser"): Promise<OpenAIOAuthLogin> {
+    return this.request<OpenAIOAuthLogin>("/api/v1/providers/openai/oauth/start", {
+      method: "POST",
+      body: JSON.stringify({ method }),
+    }, true);
+  }
+
+  completeOpenAIOAuth(redirectUrl: string): Promise<void> {
+    return this.request<void>("/api/v1/providers/openai/oauth/complete", {
+      method: "POST",
+      body: JSON.stringify({ redirectUrl }),
+    }, true);
   }
 
   cancelOpenAIOAuth(loginId: string): Promise<void> {

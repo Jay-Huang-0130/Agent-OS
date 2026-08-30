@@ -6,7 +6,7 @@ import type {
   ConnectionState,
   NotificationItem,
   OpenAIConnection,
-  OpenAIDeviceLogin,
+  OpenAIOAuthLogin,
   ResourceMetric,
   Settings,
   SetupInput,
@@ -138,7 +138,8 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
   const [notice, setNotice] = useState("");
   const [providerBusy, setProviderBusy] = useState(false);
   const [providerError, setProviderError] = useState("");
-  const [login, setLogin] = useState<OpenAIDeviceLogin>();
+  const [login, setLogin] = useState<OpenAIOAuthLogin>();
+  const [callbackUrl, setCallbackUrl] = useState("");
   useEffect(() => setDraft(value), [value]);
   useEffect(() => {
     if (provider) return;
@@ -148,7 +149,7 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
     if (!login && provider?.state !== "connecting") return;
     const check = () => void client.openAIStatus().then((status) => {
       onProvider(status);
-      if (status.state === "connected") { setLogin(undefined); setProviderError(""); }
+      if (status.state === "connected") { setLogin(undefined); setCallbackUrl(""); setProviderError(""); }
       if (status.state === "error") setProviderError(status.error ?? "OpenAI 登入失敗。");
     }).catch((error) => setProviderError(messageFor(error)));
     const timer = window.setInterval(check, 2_000);
@@ -162,15 +163,31 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
     setProviderBusy(true); setProviderError("");
     try {
       const next = await client.startOpenAIOAuth();
-      setLogin(next);
+      setCallbackUrl(""); setLogin(next);
       onProvider({ available: true, state: "connecting", authMode: null });
-      window.open(next.verificationUrl, "_blank", "noopener,noreferrer");
+      window.open(next.type === "browser" ? next.authUrl : next.verificationUrl, "_blank", "noopener,noreferrer");
+    } catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+  };
+  const completeBrowserLogin = async () => {
+    if (login?.type !== "browser" || !callbackUrl.trim()) return;
+    setProviderBusy(true); setProviderError("");
+    try { await client.completeOpenAIOAuth(callbackUrl.trim()); setCallbackUrl(""); }
+    catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+  };
+  const useDeviceLogin = async () => {
+    setProviderBusy(true); setProviderError("");
+    try {
+      if (login) await client.cancelOpenAIOAuth(login.loginId);
+      const next = await client.startOpenAIOAuth("device");
+      setCallbackUrl(""); setLogin(next);
+      onProvider({ available: true, state: "connecting", authMode: null });
+      if (next.type === "device") window.open(next.verificationUrl, "_blank", "noopener,noreferrer");
     } catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
   };
   const cancelLogin = async () => {
     if (!login) return;
     setProviderBusy(true);
-    try { await client.cancelOpenAIOAuth(login.loginId); setLogin(undefined); onProvider(await client.openAIStatus()); }
+    try { await client.cancelOpenAIOAuth(login.loginId); setCallbackUrl(""); setLogin(undefined); onProvider(await client.openAIStatus()); }
     catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
   };
   const disconnect = async () => {
@@ -190,7 +207,7 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
     </section>
     <form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form>
     <section className="settings-management"><button onClick={() => onNavigate("system")}><span><Icon name="activity" /></span><div><strong>系統狀態</strong><small>資源、服務與裝置健康度</small></div><Icon name="chevron" /></button><button onClick={() => onNavigate("activity")}><span><Icon name="update" /></span><div><strong>活動紀錄</strong><small>登入、安全與設定變更</small></div><Icon name="chevron" /></button></section>
-    {login && <div className="oauth-layer" role="presentation"><section className="oauth-dialog" role="dialog" aria-modal="true" aria-labelledby="oauth-title"><span className="oauth-mark"><Icon name="model" size={25} /></span><p className="eyebrow">Secure device authorization</p><h2 id="oauth-title">完成 OpenAI 登入</h2><p>在 OpenAI 頁面登入後輸入這組一次性代碼。完成後本頁會自動更新。</p><button className="oauth-code" onClick={() => void navigator.clipboard?.writeText(login.userCode)}><strong>{login.userCode}</strong><small>點一下複製</small></button><a className="primary oauth-open" href={login.verificationUrl} target="_blank" rel="noreferrer">開啟 OpenAI 登入頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 確認…</div><button className="oauth-cancel" disabled={providerBusy} onClick={() => void cancelLogin()}>取消登入</button></section></div>}
+    {login && <div className="oauth-layer" role="presentation"><section className="oauth-dialog" role="dialog" aria-modal="true" aria-labelledby="oauth-title"><span className="oauth-mark"><Icon name="model" size={25} /></span>{login.type === "browser" ? <><p className="eyebrow">Browser OAuth</p><h2 id="oauth-title">使用 ChatGPT 登入</h2><p>在 OpenAI 頁面完成授權。若是在樹莓派的 Agent Web 瀏覽器開啟，完成後會自動連線。</p><a className="primary oauth-open" href={login.authUrl} target="_blank" rel="noreferrer">開啟 OpenAI 授權頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI callback…</div><div className="oauth-callback"><strong>授權後停在 127.0.0.1？</strong><p>從瀏覽器網址列複製完整網址，貼到下面讓樹莓派完成 callback。</p><input type="url" value={callbackUrl} onChange={(event) => setCallbackUrl(event.target.value)} placeholder="http://localhost:…/auth/callback?code=…" autoComplete="off" spellCheck={false} /><button className="secondary" disabled={providerBusy || !callbackUrl.trim()} onClick={() => void completeBrowserLogin()}>{providerBusy ? "處理中…" : "送回樹莓派完成登入"}</button></div><button className="oauth-fallback" disabled={providerBusy} onClick={() => void useDeviceLogin()}>改用裝置代碼</button></> : <><p className="eyebrow">Device authorization</p><h2 id="oauth-title">完成 OpenAI 登入</h2><p>在 OpenAI 頁面登入後輸入這組一次性代碼。完成後本頁會自動更新。</p><button className="oauth-code" onClick={() => void navigator.clipboard?.writeText(login.userCode)}><strong>{login.userCode}</strong><small>點一下複製</small></button><a className="primary oauth-open" href={login.verificationUrl} target="_blank" rel="noreferrer">開啟 OpenAI 登入頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 確認…</div></>}{providerError && <div className="oauth-error"><Icon name="warning" size={15} />{providerError}</div>}<button className="oauth-cancel" disabled={providerBusy} onClick={() => void cancelLogin()}>取消登入</button></section></div>}
   </div>;
 }
 

@@ -69,11 +69,20 @@ export interface OpenAIConnection {
   error?: string;
 }
 
+export interface OpenAIBrowserLogin {
+  type: "browser";
+  loginId: string;
+  authUrl: string;
+}
+
 export interface OpenAIDeviceLogin {
+  type: "device";
   loginId: string;
   verificationUrl: string;
   userCode: string;
 }
+
+export type OpenAIOAuthLogin = OpenAIBrowserLogin | OpenAIDeviceLogin;
 
 export interface SetupInput {
   pairingCode: string;

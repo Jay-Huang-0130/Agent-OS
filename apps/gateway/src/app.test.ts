@@ -29,18 +29,30 @@ async function fixture(openAIAuth?: OpenAIAuthService) {
 
 class FakeOpenAIAuth implements OpenAIAuthService {
   value: OpenAIConnection = { available: true, state: "disconnected", authMode: null };
+  completedRedirectUrl: string | undefined;
   private listener: ((status: OpenAIConnection) => void) | undefined;
 
   async status(): Promise<OpenAIConnection> { return this.value; }
+  async startBrowserLogin() {
+    this.value = { available: true, state: "connecting", authMode: null };
+    this.listener?.(this.value);
+    return {
+      type: "browser" as const,
+      loginId: "8d1e249e-57a0-47cb-af4d-1e55b71fbf40",
+      authUrl: "https://auth.openai.com/oauth/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=test-state",
+    };
+  }
   async startDeviceLogin() {
     this.value = { available: true, state: "connecting", authMode: null };
     this.listener?.(this.value);
     return {
+      type: "device" as const,
       loginId: "8d1e249e-57a0-47cb-af4d-1e55b71fbf40",
       verificationUrl: "https://auth.openai.com/codex/device",
       userCode: "ABCD-1234",
     };
   }
+  async completeBrowserLogin(redirectUrl: string): Promise<void> { this.completedRedirectUrl = redirectUrl; }
   async cancelLogin(): Promise<void> { this.value = { available: true, state: "disconnected", authMode: null }; }
   async logout(): Promise<void> { this.value = { available: true, state: "disconnected", authMode: null }; }
   onUpdate(listener: (status: OpenAIConnection) => void): () => void {
@@ -147,7 +159,7 @@ test("authenticated websocket receives an initial system status snapshot", async
   socket.close();
 });
 
-test("OpenAI device OAuth endpoints require the owner session and CSRF", async () => {
+test("OpenAI browser OAuth endpoints require the owner session and CSRF", async () => {
   const provider = new FakeOpenAIAuth();
   const { app, config } = await fixture(provider);
   const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
@@ -176,8 +188,25 @@ test("OpenAI device OAuth endpoints require the owner session and CSRF", async (
     headers: { cookie, "x-csrf-token": csrfToken },
   });
   assert.equal(started.statusCode, 200);
-  assert.equal(started.json().verificationUrl, "https://auth.openai.com/codex/device");
-  assert.equal(started.json().userCode, "ABCD-1234");
+  assert.equal(started.json().type, "browser");
+  assert.match(started.json().authUrl, /^https:\/\/auth\.openai\.com\//u);
+
+  const callbackUrl = "http://localhost:1455/auth/callback?code=secret-code&state=test-state";
+  const callbackWithoutCsrf = await app.inject({
+    method: "POST",
+    url: "/api/v1/providers/openai/oauth/complete",
+    headers: { cookie },
+    payload: { redirectUrl: callbackUrl },
+  });
+  assert.equal(callbackWithoutCsrf.statusCode, 403);
+  const completed = await app.inject({
+    method: "POST",
+    url: "/api/v1/providers/openai/oauth/complete",
+    headers: { cookie, "x-csrf-token": csrfToken },
+    payload: { redirectUrl: callbackUrl },
+  });
+  assert.equal(completed.statusCode, 204);
+  assert.equal(provider.completedRedirectUrl, callbackUrl);
 
   provider.value = { available: true, state: "connected", authMode: "chatgpt", email: "owner@example.com", planType: "plus" };
   const status = await app.inject({ method: "GET", url: "/api/v1/providers/openai", headers: { cookie } });
@@ -192,4 +221,28 @@ test("OpenAI device OAuth endpoints require the owner session and CSRF", async (
     headers: { cookie, "x-csrf-token": csrfToken },
   });
   assert.equal(logout.statusCode, 204);
+});
+
+test("OpenAI device authorization remains available as a fallback", async () => {
+  const provider = new FakeOpenAIAuth();
+  const { app, config } = await fixture(provider);
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" },
+  });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+
+  const started = await app.inject({
+    method: "POST",
+    url: "/api/v1/providers/openai/oauth/start",
+    headers: { cookie, "x-csrf-token": session.json().csrfToken as string },
+    payload: { method: "device" },
+  });
+  assert.equal(started.statusCode, 200);
+  assert.equal(started.json().type, "device");
+  assert.equal(started.json().userCode, "ABCD-1234");
 });
