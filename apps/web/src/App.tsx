@@ -5,6 +5,8 @@ import type {
   BootstrapResponse,
   ConnectionState,
   NotificationItem,
+  OpenAIConnection,
+  OpenAIDeviceLogin,
   ResourceMetric,
   Settings,
   SetupInput,
@@ -130,16 +132,66 @@ function Services({ system }: { system: SystemStatus }) {
   return <div className="service-list">{system.services.map((service) => <div className="service-item" key={service.id}><span><Icon name={service.id === "browser" ? "browser" : service.id === "model" ? "model" : "server"} /></span><div><strong>{service.name}</strong><small>{service.detail}</small></div>{service.latencyMs !== undefined && <em>{service.latencyMs} ms</em>}<b className={service.state}><i />{service.state === "healthy" ? "運作中" : service.state === "degraded" ? "需注意" : service.state === "starting" ? "啟動中" : "未啟用"}</b></div>)}</div>;
 }
 
-function SettingsPage({ value, onSave, onNavigate }: { value: Settings; onSave: (settings: Settings) => Promise<void>; onNavigate: (view: "system" | "activity") => void }) {
+function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { value: Settings; provider?: OpenAIConnection; onProvider: (status: OpenAIConnection) => void; onSave: (settings: Settings) => Promise<void>; onNavigate: (view: "system" | "activity") => void }) {
   const [draft, setDraft] = useState(value);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [providerBusy, setProviderBusy] = useState(false);
+  const [providerError, setProviderError] = useState("");
+  const [login, setLogin] = useState<OpenAIDeviceLogin>();
   useEffect(() => setDraft(value), [value]);
+  useEffect(() => {
+    if (provider) return;
+    void client.openAIStatus().then(onProvider).catch((error) => setProviderError(messageFor(error)));
+  }, [provider, onProvider]);
+  useEffect(() => {
+    if (!login && provider?.state !== "connecting") return;
+    const check = () => void client.openAIStatus().then((status) => {
+      onProvider(status);
+      if (status.state === "connected") { setLogin(undefined); setProviderError(""); }
+      if (status.state === "error") setProviderError(status.error ?? "OpenAI 登入失敗。");
+    }).catch((error) => setProviderError(messageFor(error)));
+    const timer = window.setInterval(check, 2_000);
+    return () => window.clearInterval(timer);
+  }, [login, provider?.state, onProvider]);
   const save = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setNotice("");
     try { await onSave(draft); setNotice("設定已儲存"); } catch (error) { setNotice(messageFor(error)); } finally { setBusy(false); }
   };
-  return <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Preferences</p><h1>設定</h1><p>管理 Agent-OS、裝置與進階系統資訊。</p></div></header><form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form><section className="settings-management"><button onClick={() => onNavigate("system")}><span><Icon name="activity" /></span><div><strong>系統狀態</strong><small>資源、服務與裝置健康度</small></div><Icon name="chevron" /></button><button onClick={() => onNavigate("activity")}><span><Icon name="update" /></span><div><strong>活動紀錄</strong><small>登入、安全與設定變更</small></div><Icon name="chevron" /></button></section><section className="phase-card"><span><Icon name="model" /></span><div><p className="eyebrow">Phase 3</p><h2>模型與 OAuth</h2><p>OpenAI、API Key 與本地模型連線會在下一階段加入；Phase 2 不會假裝連線模型。</p></div></section></div>;
+  const connect = async () => {
+    setProviderBusy(true); setProviderError("");
+    try {
+      const next = await client.startOpenAIOAuth();
+      setLogin(next);
+      onProvider({ available: true, state: "connecting", authMode: null });
+      window.open(next.verificationUrl, "_blank", "noopener,noreferrer");
+    } catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+  };
+  const cancelLogin = async () => {
+    if (!login) return;
+    setProviderBusy(true);
+    try { await client.cancelOpenAIOAuth(login.loginId); setLogin(undefined); onProvider(await client.openAIStatus()); }
+    catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+  };
+  const disconnect = async () => {
+    setProviderBusy(true); setProviderError("");
+    try { await client.disconnectOpenAI(); onProvider(await client.openAIStatus()); }
+    catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+  };
+  const connected = provider?.state === "connected";
+  return <div className="page-stack">
+    <header className="page-header"><div><p className="eyebrow">Preferences</p><h1>設定</h1><p>管理 Agent-OS、模型連線與進階系統資訊。</p></div></header>
+    <section className={`provider-card ${provider?.state ?? "loading"}`}>
+      <div className="provider-logo"><Icon name="model" size={24} /></div>
+      <div className="provider-copy"><div><h2>OpenAI</h2><span className="provider-state"><i />{connected ? "已連線" : provider?.state === "connecting" ? "等待登入" : provider?.state === "unavailable" ? "元件未安裝" : provider?.state === "error" ? "連線異常" : "尚未連線"}</span></div><p>{connected ? `${provider?.email ?? "ChatGPT 帳號"}${provider?.planType ? `・${provider.planType.toUpperCase()}` : ""}` : "使用 ChatGPT 帳號安全連接 OpenAI，由官方 Codex 管理 OAuth 與權杖更新。"}</p></div>
+      {connected ? <button className="secondary danger-button" disabled={providerBusy} onClick={() => void disconnect()}>{providerBusy ? "處理中…" : "中斷連線"}</button> : <button className="primary provider-connect" disabled={providerBusy || provider?.state === "unavailable"} onClick={() => void connect()}>{providerBusy ? "正在準備…" : "連接 OpenAI"}<Icon name="arrow" size={17} /></button>}
+      {providerError && <div className="provider-error"><Icon name="warning" size={16} />{providerError}</div>}
+      <small className="provider-security"><Icon name="lock" size={14} />OAuth 權杖只保存在這台裝置的 Agent-OS 私有資料目錄，不會傳到瀏覽器。</small>
+    </section>
+    <form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form>
+    <section className="settings-management"><button onClick={() => onNavigate("system")}><span><Icon name="activity" /></span><div><strong>系統狀態</strong><small>資源、服務與裝置健康度</small></div><Icon name="chevron" /></button><button onClick={() => onNavigate("activity")}><span><Icon name="update" /></span><div><strong>活動紀錄</strong><small>登入、安全與設定變更</small></div><Icon name="chevron" /></button></section>
+    {login && <div className="oauth-layer" role="presentation"><section className="oauth-dialog" role="dialog" aria-modal="true" aria-labelledby="oauth-title"><span className="oauth-mark"><Icon name="model" size={25} /></span><p className="eyebrow">Secure device authorization</p><h2 id="oauth-title">完成 OpenAI 登入</h2><p>在 OpenAI 頁面登入後輸入這組一次性代碼。完成後本頁會自動更新。</p><button className="oauth-code" onClick={() => void navigator.clipboard?.writeText(login.userCode)}><strong>{login.userCode}</strong><small>點一下複製</small></button><a className="primary oauth-open" href={login.verificationUrl} target="_blank" rel="noreferrer">開啟 OpenAI 登入頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 確認…</div><button className="oauth-cancel" disabled={providerBusy} onClick={() => void cancelLogin()}>取消登入</button></section></div>}
+  </div>;
 }
 
 type TaskKind = "once" | "scheduled" | "watch";
@@ -436,6 +488,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [snapshot, setSnapshot] = useState<{ system: SystemStatus; activity: ActivityItem[] }>();
   const [settings, setSettings] = useState<Settings>();
+  const [openAI, setOpenAI] = useState<OpenAIConnection>();
   const [error, setError] = useState("");
   const [briefingOpen, setBriefingOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -455,6 +508,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       if (event.type === "activity.created") setSnapshot((current) => current ? { ...current, activity: [event.data, ...current.activity].slice(0, 30) } : current);
       if (event.type === "settings.updated") setSettings(event.data);
       if (event.type === "system.status") setSnapshot((current) => current ? { ...current, system: event.data } : current);
+      if (event.type === "provider.openai.updated") setOpenAI(event.data);
       if (event.type === "notification.created") {
         setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
         setToast(event.data);
@@ -501,7 +555,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
         {view === "records" && <RecordsPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}
-        {view === "settings" && <SettingsPage value={settings} onSave={async (next) => setSettings(await client.updateSettings(next))} onNavigate={setView} />}
+        {view === "settings" && <SettingsPage value={settings} provider={openAI} onProvider={setOpenAI} onSave={async (next) => setSettings(await client.updateSettings(next))} onNavigate={setView} />}
       </main>
       <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>
     </div>

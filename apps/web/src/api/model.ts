@@ -60,6 +60,21 @@ export interface Settings {
   theme: "system" | "light" | "dark";
 }
 
+export interface OpenAIConnection {
+  available: boolean;
+  state: "unavailable" | "disconnected" | "connecting" | "connected" | "error";
+  authMode: string | null;
+  email?: string;
+  planType?: string;
+  error?: string;
+}
+
+export interface OpenAIDeviceLogin {
+  loginId: string;
+  verificationUrl: string;
+  userCode: string;
+}
+
 export interface SetupInput {
   pairingCode: string;
   password: string;
@@ -71,4 +86,5 @@ export type AgentEvent =
   | { type: "activity.created"; data: ActivityItem }
   | { type: "settings.updated"; data: Settings }
   | { type: "system.status"; data: SystemStatus }
+  | { type: "provider.openai.updated"; data: OpenAIConnection }
   | { type: "notification.created"; data: NotificationItem };

@@ -7,6 +7,8 @@ export interface GatewayConfig {
   stateDir: string;
   databasePath: string;
   pairingCodePath: string;
+  codexHome: string;
+  codexEntrypoint: string;
   webDistPath: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -35,6 +37,12 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     stateDir,
     databasePath: process.env.AGENT_OS_DATABASE_PATH ?? join(stateDir, "agent-os.db"),
     pairingCodePath: process.env.AGENT_OS_PAIRING_CODE_FILE ?? join(stateDir, "pairing-code"),
+    codexHome: process.env.AGENT_OS_CODEX_HOME
+      ? resolve(process.env.AGENT_OS_CODEX_HOME)
+      : join(stateDir, "credentials", "codex"),
+    codexEntrypoint: process.env.AGENT_OS_CODEX_ENTRYPOINT
+      ? resolve(process.env.AGENT_OS_CODEX_ENTRYPOINT)
+      : resolve(process.cwd(), "node_modules", "@openai", "codex", "bin", "codex.js"),
     webDistPath: process.env.AGENT_OS_WEB_DIST
       ? resolve(process.env.AGENT_OS_WEB_DIST)
       : resolve(process.cwd(), "apps", "web", "dist"),

@@ -4,6 +4,8 @@ import type {
   BootstrapResponse,
   ConnectionState,
   MetaResponse,
+  OpenAIConnection,
+  OpenAIDeviceLogin,
   SessionResponse,
   Settings,
   SetupInput,
@@ -79,6 +81,25 @@ export class AgentClient {
 
   updateSettings(settings: Settings): Promise<Settings> {
     return this.request<Settings>("/api/v1/settings", { method: "PUT", body: JSON.stringify(settings) }, true);
+  }
+
+  openAIStatus(): Promise<OpenAIConnection> {
+    return this.request<OpenAIConnection>("/api/v1/providers/openai");
+  }
+
+  startOpenAIOAuth(): Promise<OpenAIDeviceLogin> {
+    return this.request<OpenAIDeviceLogin>("/api/v1/providers/openai/oauth/start", { method: "POST" }, true);
+  }
+
+  cancelOpenAIOAuth(loginId: string): Promise<void> {
+    return this.request<void>("/api/v1/providers/openai/oauth/cancel", {
+      method: "POST",
+      body: JSON.stringify({ loginId }),
+    }, true);
+  }
+
+  disconnectOpenAI(): Promise<void> {
+    return this.request<void>("/api/v1/providers/openai/logout", { method: "POST" }, true);
   }
 
   subscribe(onEvent: (event: AgentEvent) => void, onState: (state: ConnectionState) => void): () => void {

@@ -75,8 +75,14 @@ GET  /api/v1/system/status
 GET  /api/v1/activity
 GET  /api/v1/settings
 PUT  /api/v1/settings
+GET  /api/v1/providers/openai
+POST /api/v1/providers/openai/oauth/start
+POST /api/v1/providers/openai/oauth/cancel
+POST /api/v1/providers/openai/logout
 WS   /api/v1/events
 ```
+
+`/providers/openai` 是 Phase 3 開始後加入的相容擴充，詳細流程見 [OpenAI OAuth 整合](OPENAI-OAUTH.md)。
 
 ## 本機開發
 

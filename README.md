@@ -5,7 +5,7 @@
 
 Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接受委託、持續工作、使用不同裝置能力，並對結果負責的私人 AI 作業層。
 
-專案目前已完成 Phase 0–2：可攜式基礎架構、隔離式安裝器、Gateway API 與 Web 管理介面。聊天、工具調用、模型提供者與任務佇列會從 Phase 3 開始接入。
+專案目前已完成 Phase 0–2：可攜式基礎架構、隔離式安裝器、Gateway API 與 Web 管理介面。Phase 3 已開始，第一個可用切片是透過 OpenAI 官方 Codex app-server 連接 ChatGPT OAuth；聊天、工具調用與任務佇列仍會繼續接入。
 
 ## Phase 0–2 已完成
 
@@ -191,14 +191,17 @@ bash ./install.sh --force-agent-web-update
 - [VISION.md](VISION.md)：Agent-OS 的完整產品願景。
 - [Phase 0–2 實作說明](docs/PHASE-0-2.md)：支援平台、隔離方式、API、安全與安裝流程。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
+- [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、device-code 登入、隔離與 API。
 
 ## 專案狀態
 
-目前版本建立的是可以實際執行的安裝與能力管理 foundation，不代表完整 Agent-OS 已完成。後續建議依序實作：
+目前版本建立的是可以實際執行的安裝與能力管理 foundation，不代表完整 Agent-OS 已完成。Phase 3 已完成 OpenAI OAuth 連線基礎：設定頁可以啟動 ChatGPT device-code 登入、查詢連線狀態、取消登入與登出。OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
 
-1. Agent Web protected Adapter。
-2. Capability Registry。
-3. Device identity 與 Personal Device Mesh。
-4. Persistent Goal Engine。
+後續建議依序實作：
+
+1. Persistent Goal Engine 與背景 Worker。
+2. Agent Runtime 與模型抽象層（使用目前的 Codex app-server 連線）。
+3. Agent Web protected Adapter。
+4. Capability Registry。
 5. Approval、Audit 與 Human Takeover。
-6. Agent Runtime 與模型抽象層。
+6. Device identity 與 Personal Device Mesh。

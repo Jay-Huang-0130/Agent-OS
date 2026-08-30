@@ -17,6 +17,7 @@ import {
 } from "./auth.js";
 import type { GatewayConfig } from "./config.js";
 import { publicDeviceName } from "./config.js";
+import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
 import { AgentDatabase, type ActivityRecord } from "./database.js";
 import { collectSystemStatus } from "./metrics.js";
 
@@ -34,6 +35,7 @@ const setupSchema = z.object({
 }).strict();
 
 const loginSchema = z.object({ password: z.string().min(1).max(256) }).strict();
+const cancelProviderLoginSchema = z.object({ loginId: z.string().uuid() }).strict();
 
 type Settings = z.infer<typeof settingsSchema>;
 type EventSocket = {
@@ -49,6 +51,7 @@ interface LoginAttempt {
 
 export interface BuildAppOptions {
   logger?: boolean;
+  openAIAuth?: OpenAIAuthService;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -149,6 +152,10 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       }
     }
   };
+  const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
+  const stopOpenAIUpdates = openAIAuth.onUpdate((status) => {
+    broadcast({ type: "provider.openai.updated", data: status });
+  });
 
   const addActivity = (type: string, title: string, detail: string, severity = "info") => {
     const record = database.addActivity(type, title, detail, severity);
@@ -293,6 +300,51 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     return parsed.data;
   });
 
+  app.get("/api/v1/providers/openai", async (request, reply) => {
+    if (!requireSession(request, reply, database)) return;
+    return openAIAuth.status(false);
+  });
+
+  app.post("/api/v1/providers/openai/oauth/start", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    try {
+      const login = await openAIAuth.startDeviceLogin();
+      addActivity("settings", "OpenAI sign-in started", `${session.displayName} started secure device authorization.`);
+      return login;
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : "OpenAI sign-in could not be started.";
+      return apiError(reply, 503, "openai_login_unavailable", message);
+    }
+  });
+
+  app.post("/api/v1/providers/openai/oauth/cancel", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = cancelProviderLoginSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_login_id", "The OpenAI login ID is invalid.");
+    try {
+      await openAIAuth.cancelLogin(parsed.data.loginId);
+      return reply.code(204).send();
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : "OpenAI sign-in could not be cancelled.";
+      return apiError(reply, 503, "openai_cancel_failed", message);
+    }
+  });
+
+  app.post("/api/v1/providers/openai/logout", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    try {
+      await openAIAuth.logout();
+      addActivity("settings", "OpenAI disconnected", `${session.displayName} disconnected the ChatGPT account.`);
+      return reply.code(204).send();
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 500) : "OpenAI could not be disconnected.";
+      return apiError(reply, 503, "openai_logout_failed", message);
+    }
+  });
+
   app.get("/api/v1/events", { websocket: true }, (socket, request) => {
     if (!requestIsSameOrigin(request)) {
       socket.close(1008, "invalid origin");
@@ -368,6 +420,8 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     clearInterval(heartbeat);
     for (const socket of sockets) socket.close(1001, "server shutdown");
     sockets.clear();
+    stopOpenAIUpdates();
+    await openAIAuth.close();
     database.close();
   });
 
