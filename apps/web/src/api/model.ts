@@ -43,6 +43,16 @@ export interface ActivityItem {
   occurredAt: string;
 }
 
+export interface NotificationItem {
+  id: string;
+  title: string;
+  detail: string;
+  kind: "task" | "attention" | "system";
+  createdAt: string;
+  read: boolean;
+  taskId?: string;
+}
+
 export interface Settings {
   deviceName: string;
   language: "zh-Hant" | "en";
@@ -59,4 +69,6 @@ export interface SetupInput {
 export type AgentEvent =
   | { type: "heartbeat"; data: { at: string } }
   | { type: "activity.created"; data: ActivityItem }
-  | { type: "settings.updated"; data: Settings };
+  | { type: "settings.updated"; data: Settings }
+  | { type: "system.status"; data: SystemStatus }
+  | { type: "notification.created"; data: NotificationItem };

@@ -305,6 +305,9 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     }
     sockets.add(socket);
     socket.send(JSON.stringify({ type: "heartbeat", data: { at: new Date().toISOString() } }));
+    void collectSystemStatus(config.version).then((status) => {
+      if (sockets.has(socket)) socket.send(JSON.stringify({ type: "system.status", data: status }));
+    }).catch(() => { /* The regular status stream will retry. */ });
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => sockets.delete(socket));
   });
@@ -313,6 +316,39 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     broadcast({ type: "heartbeat", data: { at: new Date().toISOString() } });
   }, 25_000);
   heartbeat.unref();
+
+  let collectingSystemStatus = false;
+  let previousOverallStatus: "healthy" | "degraded" | "unavailable" | undefined;
+  const systemStatusStream = setInterval(async () => {
+    if (!sockets.size || collectingSystemStatus) return;
+    collectingSystemStatus = true;
+    try {
+      const status = await collectSystemStatus(config.version);
+      broadcast({ type: "system.status", data: status });
+      if (status.overall === "degraded" && previousOverallStatus !== "degraded") {
+        broadcast({
+          type: "notification.created",
+          data: {
+            id: `system-${Date.now()}`,
+            title: "系統狀態需要注意",
+            detail: "Agent-OS 偵測到資源或服務異常，請查看系統狀態。",
+            kind: "system",
+            createdAt: status.generatedAt,
+            read: false,
+          },
+        });
+      }
+      previousOverallStatus = status.overall;
+    } finally {
+      collectingSystemStatus = false;
+    }
+  }, 15_000);
+  systemStatusStream.unref();
+
+  app.addHook("onClose", async () => {
+    clearInterval(heartbeat);
+    clearInterval(systemStatusStream);
+  });
 
   if (existsSync(join(config.webDistPath, "index.html"))) {
     await app.register(fastifyStatic, { root: config.webDistPath, prefix: "/" });

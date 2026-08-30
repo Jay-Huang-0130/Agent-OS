@@ -4,6 +4,7 @@ import type {
   ActivityItem,
   BootstrapResponse,
   ConnectionState,
+  NotificationItem,
   ResourceMetric,
   Settings,
   SetupInput,
@@ -11,7 +12,7 @@ import type {
 } from "./api/model";
 import { Icon, Logo, type IconName } from "./components/Icon";
 
-type View = "overview" | "tasks" | "system" | "activity" | "settings";
+type View = "overview" | "tasks" | "outputs" | "conversations" | "system" | "activity" | "settings";
 const client = new AgentClient();
 
 function messageFor(error: unknown): string {
@@ -364,6 +365,57 @@ function TasksPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTas
   </div>;
 }
 
+type OutputRecord = {
+  id: string;
+  title: string;
+  summary: string;
+  kind: "report" | "file" | "research";
+  createdAt: string;
+  taskId?: string;
+  files: string[];
+};
+
+const demoOutputs: OutputRecord[] = [
+  { id: "ssd-output", title: "樹莓派外接 SSD 比較報告", summary: "五款 SSD 的速度、穩定性、散熱與價格比較，並附上 Agent-OS 長時間運行建議。", kind: "report", createdAt: "今天 10:26", taskId: "ssd-report", files: ["比較報告.pdf", "產品資料.csv"] },
+  { id: "security-output", title: "昨晚安全事件摘要", summary: "沒有異常登入；兩次短暫斷線皆已自行恢復，無需進一步處理。", kind: "report", createdAt: "今天 08:04", taskId: "security-report", files: ["安全摘要.md"] },
+  { id: "roadmap-output", title: "Agent-OS 路線圖草稿", summary: "依 VISION.md 整理出的產品階段、技術相依項目與下一步開發順序。", kind: "file", createdAt: "昨天 21:18", taskId: "vision-roadmap", files: ["ROADMAP-draft.md"] },
+  { id: "agent-sources", title: "AI Agent 工具調用研究資料", summary: "彙整工具權限、背景任務與模型調度的主要設計參考。", kind: "research", createdAt: "8 月 28 日", files: ["來源清單.json", "研究筆記.md"] },
+];
+
+const demoNotifications: NotificationItem[] = [
+  { id: "notice-output", title: "SSD 比較報告已完成", detail: "Samsung T7 綜合穩定性最佳，完整報告已放到成果中心。", kind: "task", createdAt: new Date(Date.now() - 12 * 60_000).toISOString(), read: false, taskId: "ssd-report" },
+  { id: "notice-auth", title: "Google Drive 需要重新授權", detail: "客戶文件整理已暫停，重新連接後會從原進度繼續。", kind: "attention", createdAt: new Date(Date.now() - 32 * 60_000).toISOString(), read: false, taskId: "drive-auth" },
+  { id: "notice-system", title: "服務已自行恢復", detail: "Gateway 曾短暫失去網路連線，目前所有服務正常。", kind: "system", createdAt: new Date(Date.now() - 3 * 60 * 60_000).toISOString(), read: true },
+];
+
+function OutputsPage({ onOpenTask }: { onOpenTask: (task: DemoTask) => void }) {
+  const [filter, setFilter] = useState<"all" | OutputRecord["kind"]>("all");
+  const records = demoOutputs.filter((output) => filter === "all" || output.kind === filter);
+  const labels: Record<OutputRecord["kind"], string> = { report: "報告", file: "檔案", research: "研究整理" };
+  return <div className="library-page"><header className="library-header"><div><p className="eyebrow">Outputs</p><h1>成果中心</h1><p>所有完成的報告、檔案與研究資料都集中在這裡。</p></div><button className="secondary"><Icon name="storage" />開啟工作區</button></header><div className="library-toolbar"><div className="task-filters"><button className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")}>全部 <span>{demoOutputs.length}</span></button>{(["report", "file", "research"] as const).map((kind) => <button key={kind} className={filter === kind ? "active" : ""} onClick={() => setFilter(kind)}>{labels[kind]} <span>{demoOutputs.filter((output) => output.kind === kind).length}</span></button>)}</div><label className="library-search"><Icon name="eye" size={17} /><input placeholder="搜尋成果…" /></label></div><div className="output-grid">{records.map((output) => <article className="output-card" key={output.id}><div className="output-card-head"><span className={`output-icon ${output.kind}`}><Icon name={output.kind === "report" ? "activity" : output.kind === "file" ? "storage" : "globe"} /></span><div><span>{labels[output.kind]}</span><small>{output.createdAt}</small></div><button className="icon-only" aria-label="更多操作"><Icon name="settings" size={17} /></button></div><h2>{output.title}</h2><p>{output.summary}</p><div className="output-files">{output.files.map((file) => <span key={file}><Icon name="storage" size={14} />{file}</span>)}</div><footer><span>由 Agent-OS 自動整理</span><button onClick={() => { const task = demoTasks.find((item) => item.id === output.taskId); if (task) onOpenTask(task); }}>查看成果<Icon name="arrow" size={16} /></button></footer></article>)}</div></div>;
+}
+
+type Conversation = { id: string; title: string; preview: string; time: string; messages: Array<{ role: "user" | "agent"; text: string; task?: string }> };
+const demoConversations: Conversation[] = [
+  { id: "conversation-roadmap", title: "Agent-OS 開發路線", preview: "已建立任務並放進正在進行。", time: "今天 10:11", messages: [{ role: "user", text: "幫我按照 VISION.md 整理接下來的開發路線。" }, { role: "agent", text: "我會整理產品階段、技術相依性與執行順序，完成後交付一份可直接維護的路線圖。", task: "整理 Agent-OS 開發路線" }, { role: "user", text: "權限和工具調用要放在比較前面。" }, { role: "agent", text: "收到，已更新任務目標，會優先處理工具權限與安全邊界。" }] },
+  { id: "conversation-ssd", title: "適合樹莓派的 SSD", preview: "比較報告已完成。", time: "今天 09:36", messages: [{ role: "user", text: "找幾款適合樹莓派長期運行的外接 SSD。" }, { role: "agent", text: "已建立比較任務。我會同時評估穩定性、溫度、速度和價格。", task: "比較樹莓派外接 SSD" }, { role: "agent", text: "報告已完成。Samsung T7 的綜合穩定性最好，成果已放進成果中心。" }] },
+  { id: "conversation-health", title: "服務健康度追蹤", preview: "持續追蹤中，所有服務正常。", time: "昨天", messages: [{ role: "user", text: "幫我持續注意 Agent-OS 有沒有斷線。" }, { role: "agent", text: "已開始持續追蹤 Gateway、網路與儲存空間。有異常時我會直接通知你。", task: "追蹤 Agent-OS 服務健康度" }] },
+];
+
+function ConversationsPage({ onOpenAssistant }: { onOpenAssistant: () => void }) {
+  const [selectedId, setSelectedId] = useState(demoConversations[0].id);
+  const conversation = demoConversations.find((item) => item.id === selectedId) ?? demoConversations[0];
+  return <div className="conversations-page"><header className="library-header"><div><p className="eyebrow">Conversations</p><h1>對話紀錄</h1><p>回顧交付過的指令、補充內容與 Agent 的回覆。</p></div><button className="primary" onClick={onOpenAssistant}><Icon name="sparkle" />開始新對話</button></header><div className="conversation-layout"><aside className="conversation-list"><label className="conversation-search"><Icon name="eye" size={17} /><input placeholder="搜尋對話…" /></label><div>{demoConversations.map((item) => <button key={item.id} className={selectedId === item.id ? "active" : ""} onClick={() => setSelectedId(item.id)}><span className="conversation-avatar"><Icon name="sparkle" size={17} /></span><span><strong>{item.title}</strong><small>{item.preview}</small></span><time>{item.time}</time></button>)}</div></aside><section className="conversation-thread"><header><div><h2>{conversation.title}</h2><p>與 Agent-OS 的歷史對話</p></div><button className="icon-only"><Icon name="settings" size={17} /></button></header><div className="message-history">{conversation.messages.map((message, index) => <div className={`history-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "agent" ? <Icon name="sparkle" size={17} /> : "JA"}</span><div><small>{message.role === "agent" ? "Agent-OS" : "你"}</small><p>{message.text}</p>{message.task && <button className="conversation-task-link"><Icon name="check" size={16} /><span><strong>已建立任務</strong>{message.task}</span><Icon name="chevron" size={16} /></button>}</div></div>)}</div><footer><button onClick={onOpenAssistant}><Icon name="sparkle" />繼續這段對話</button></footer></section></div></div>;
+}
+
+function NotificationCenter({ items, onClose, onRead, onReadAll, onOpenTask }: { items: NotificationItem[]; onClose: () => void; onRead: (id: string) => void; onReadAll: () => void; onOpenTask: (task: DemoTask) => void }) {
+  return <div className="notification-layer" role="presentation" onMouseDown={onClose}><aside className="notification-center" role="dialog" aria-modal="true" aria-labelledby="notification-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="notification-title">通知</h2><p>{items.filter((item) => !item.read).length} 則尚未讀取</p></div><button className="mark-all" onClick={onReadAll}>全部標為已讀</button><button className="icon-only" onClick={onClose}><Icon name="close" /></button></header><div className="notification-list">{items.map((item) => <button key={item.id} className={item.read ? "read" : ""} onClick={() => { onRead(item.id); const task = demoTasks.find((entry) => entry.id === item.taskId); if (task) onOpenTask(task); }}><span className={`notification-kind ${item.kind}`}><Icon name={item.kind === "task" ? "check" : item.kind === "attention" ? "warning" : "activity"} /></span><span><strong>{item.title}</strong><p>{item.detail}</p><small>{relativeTime(item.createdAt)}</small></span>{!item.read && <i />}</button>)}</div><footer><Icon name="wifi" size={15} />通知透過即時連線送達</footer></aside></div>;
+}
+
+function NotificationToast({ item, onClose, onOpen }: { item: NotificationItem; onClose: () => void; onOpen: () => void }) {
+  return <aside className={`notification-toast ${item.kind}`} role="status"><span><Icon name={item.kind === "task" ? "check" : item.kind === "attention" ? "warning" : "activity"} /></span><div><small>{item.kind === "task" ? "任務已完成" : item.kind === "attention" ? "需要你處理" : "系統通知"}</small><strong>{item.title}</strong><p>{item.detail}</p><button onClick={onOpen}>查看內容<Icon name="chevron" size={15} /></button></div><button className="toast-close" onClick={onClose}><Icon name="close" size={16} /></button></aside>;
+}
+
 function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLogout: () => Promise<void> }) {
   const [view, setView] = useState<View>("overview");
   const [mobileNav, setMobileNav] = useState(false);
@@ -374,6 +426,9 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [briefingOpen, setBriefingOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<DemoTask>();
+  const [notifications, setNotifications] = useState<NotificationItem[]>(demoNotifications);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [toast, setToast] = useState<NotificationItem>();
 
   const refresh = async () => {
     try { setSnapshot(await client.dashboard()); setError(""); } catch (cause) { setError(messageFor(cause)); }
@@ -385,17 +440,28 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     const stop = client.subscribe((event) => {
       if (event.type === "activity.created") setSnapshot((current) => current ? { ...current, activity: [event.data, ...current.activity].slice(0, 30) } : current);
       if (event.type === "settings.updated") setSettings(event.data);
+      if (event.type === "system.status") setSnapshot((current) => current ? { ...current, system: event.data } : current);
+      if (event.type === "notification.created") {
+        setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
+        setToast(event.data);
+      }
     }, setConnection);
-    const timer = window.setInterval(() => void refresh(), 30_000);
-    return () => { stop(); window.clearInterval(timer); };
+    return stop;
   }, []);
 
   useEffect(() => {
     if (settings) document.documentElement.dataset.theme = settings.theme;
   }, [settings]);
 
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(undefined), 7_000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   const nav = useMemo(() => [
     ["overview", "今日", "dashboard"], ["tasks", "任務", "check"],
+    ["outputs", "成果", "storage"], ["conversations", "對話", "model"],
     ["system", "系統", "activity"], ["activity", "活動", "update"],
     ["settings", "設定", "settings"],
   ] as Array<[View, string, IconName]>, []);
@@ -403,7 +469,8 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   if (!snapshot || !settings) return <Loading />;
   const system = snapshot.system;
   const name = bootstrap.session.user?.displayName ?? "Owner";
-  const pageTitles: Record<View, string> = { overview: "今日", tasks: "所有任務", system: "系統狀態", activity: "活動紀錄", settings: "裝置設定" };
+  const pageTitles: Record<View, string> = { overview: "今日", tasks: "所有任務", outputs: "成果中心", conversations: "對話紀錄", system: "系統狀態", activity: "活動紀錄", settings: "裝置設定" };
+  const unreadCount = notifications.filter((item) => !item.read).length;
 
   return <div className="app-shell polished-shell">
     <aside className={mobileNav ? "sidebar open" : "sidebar"}>
@@ -414,20 +481,24 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     </aside>
     {mobileNav && <button className="scrim" aria-label="關閉選單" onClick={() => setMobileNav(false)} />}
     <div className="main-column">
-      <header className="topbar"><button className="icon-only menu-button" onClick={() => setMobileNav(true)}><Icon name="menu" /></button><div className="topbar-title"><strong>{pageTitles[view]}</strong><small>Agent-OS・{settings.deviceName}</small></div><div className={`connection ${connection}`}><i />{connection === "online" ? "已連線" : connection === "reconnecting" ? "重新連線" : "連線中"}</div><button className="notification-button" onClick={() => setView("overview")} aria-label="查看需要處理的事項"><Icon name="warning" size={18} /><span>2</span></button><span className="topbar-avatar avatar">{bootstrap.session.user?.initials ?? "AO"}</span></header>
-      <main className={`content ${view === "overview" || view === "tasks" ? "workspace-content" : ""}`}>
+      <header className="topbar"><button className="icon-only menu-button" onClick={() => setMobileNav(true)}><Icon name="menu" /></button><div className="topbar-title"><strong>{pageTitles[view]}</strong><small>Agent-OS・{settings.deviceName}</small></div><div className={`connection ${connection}`}><i />{connection === "online" ? "即時連線" : connection === "reconnecting" ? "重新連線" : "連線中"}</div><button className="notification-button" onClick={() => setNotificationOpen(true)} aria-label="開啟通知中心"><Icon name="warning" size={18} />{unreadCount > 0 && <span>{unreadCount}</span>}</button><span className="topbar-avatar avatar">{bootstrap.session.user?.initials ?? "AO"}</span></header>
+      <main className={`content ${["overview", "tasks", "outputs", "conversations"].includes(view) ? "workspace-content" : ""}`}>
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
         {view === "overview" && <OverviewPage name={name} onOpenBriefing={() => setBriefingOpen(true)} onOpenTask={setSelectedTask} />}
         {view === "tasks" && <TasksPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
+        {view === "outputs" && <OutputsPage onOpenTask={setSelectedTask} />}
+        {view === "conversations" && <ConversationsPage onOpenAssistant={() => setAssistantOpen(true)} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}
         {view === "settings" && <SettingsPage value={settings} onSave={async (next) => setSettings(await client.updateSettings(next))} />}
       </main>
-      <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>
+      {view !== "conversations" && <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>}
     </div>
     {briefingOpen && view === "overview" && <BriefingModal name={name} onClose={() => setBriefingOpen(false)} />}
     {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} />}
     {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(undefined)} />}
+    {notificationOpen && <NotificationCenter items={notifications} onClose={() => setNotificationOpen(false)} onRead={(id) => setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item))} onReadAll={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} onOpenTask={(task) => { setNotificationOpen(false); setSelectedTask(task); }} />}
+    {toast && <NotificationToast item={toast} onClose={() => setToast(undefined)} onOpen={() => { const task = demoTasks.find((item) => item.id === toast.taskId); if (task) setSelectedTask(task); setToast(undefined); }} />}
   </div>;
 }
 

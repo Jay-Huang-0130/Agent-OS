@@ -91,3 +91,34 @@ test("protected routes require authentication and CSRF", async () => {
   assert.equal(updated.statusCode, 200);
   assert.equal(updated.json().theme, "dark");
 });
+
+test("authenticated websocket receives an initial system status snapshot", async () => {
+  const { app, config } = await fixture();
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" },
+  });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const cookieHeader = Array.isArray(cookie) ? cookie[0] : cookie;
+  assert.ok(cookieHeader);
+  await app.ready();
+
+  const socket = await app.injectWS("/api/v1/events", { headers: { cookie: cookieHeader } });
+  const status = await new Promise<{ type: string; data: { generatedAt: string; overall: string } }>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("system status event timed out")), 4_000);
+    socket.on("message", (frame: Buffer) => {
+      const event = JSON.parse(frame.toString()) as { type: string; data: { generatedAt: string; overall: string } };
+      if (event.type !== "system.status") return;
+      clearTimeout(timeout);
+      resolve(event);
+    });
+  });
+
+  assert.equal(status.type, "system.status");
+  assert.ok(status.data.generatedAt);
+  assert.ok(["healthy", "degraded", "unavailable"].includes(status.data.overall));
+  socket.close();
+});
