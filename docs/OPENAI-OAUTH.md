@@ -2,20 +2,16 @@
 
 Agent-OS 使用 OpenAI 官方 `@openai/codex` 套件提供的 `codex app-server`，不自行模擬 OAuth、不讀取瀏覽器 Cookie，也不把 access token 或 refresh token 傳到 Web UI。
 
-## 預設：瀏覽器 OAuth
+## Headless 登入流程
 
 1. 在 Agent-OS 的「設定」頁按下「連接 OpenAI」。
-2. Gateway 透過 Codex app-server 的 `account/login/start` 啟動 `chatgpt` 瀏覽器 OAuth。
-3. Gateway 透過 Agent Web 的受限本機 Unix Socket，把官方授權頁開在樹莓派上的既有 Chromium；此能力只接受 OpenAI 官方 HTTPS OAuth host，不提供一般網頁控制。
-4. Web UI 開啟 Agent Web noVNC，讓使用者在樹莓派瀏覽器完成登入或 MFA。
-5. OpenAI 重新導向 `localhost` 後仍在同一台樹莓派，因此 Codex app-server 會自動接收 callback，不必複製或貼回網址。
-6. Codex app-server 完成 code exchange、保存 OAuth 資料並處理後續 refresh。
+2. Gateway 透過 Codex app-server 的 `account/login/start` 啟動 `chatgptDeviceCode`。
+3. Web UI 顯示 OpenAI 驗證網址與一次性代碼，並在使用者目前的瀏覽器開啟驗證頁。
+4. 使用者登入 ChatGPT 並輸入一次性代碼；樹莓派不需要 GUI、Chromium 或 localhost callback。
+5. Codex app-server 收到 `account/login/completed`，保存 OAuth 資料並自行處理後續 refresh。
+6. Gateway 只把連線狀態、帳號 Email 與方案類型傳給已登入的 Agent-OS 擁有者。
 
-舊版 Agent Web 或 Agent Web 不可用時，UI 才會顯示遠端 callback 回送備援。Gateway 只接受目前登入產生的 `http://localhost`、`127.0.0.1` 或 `::1` callback，並驗證完全相同的 port、path 與 OAuth state，避免回送功能被用來請求其他位址。callback URL 含有短效授權碼，因此不會寫入資料庫、活動細節或日誌。
-
-## 備援：裝置代碼
-
-設定視窗仍提供「改用裝置代碼」。這會啟動 `chatgptDeviceCode`；只有瀏覽器 callback 流程不可用時才需要。OpenAI 帳號若停用 Codex 裝置代碼授權，應繼續使用預設瀏覽器 OAuth。
+這與 OpenClaw 在 headless／callback-hostile 環境使用 `--device-code` 的設計相同。OpenAI 帳號或 workspace 必須允許 Codex 裝置代碼登入。
 
 ## 隔離與資料位置
 
@@ -24,7 +20,7 @@ Agent-OS 使用 OpenAI 官方 `@openai/codex` 套件提供的 `codex app-server`
 - `CODEX_HOME` 預設為 `~/.local/state/agent-os/credentials/codex`。
 - 安裝器以 `0700` 建立 credentials 目錄，systemd 服務使用 `UMask=0077`。
 - 更新 release 時，state 目錄不會刪除，因此登入狀態可以跨版本保留。
-- 瀏覽器只取得登入網址與非敏感的連線摘要；OAuth token 不會出現在 API 回應、WebSocket 或活動紀錄。
+- 瀏覽器只取得驗證網址、一次性代碼與非敏感的連線摘要；OAuth token 不會出現在 API 回應、WebSocket 或活動紀錄。
 
 ## API
 
@@ -33,12 +29,11 @@ Agent-OS 使用 OpenAI 官方 `@openai/codex` 套件提供的 `codex app-server`
 ```text
 GET  /api/v1/providers/openai
 POST /api/v1/providers/openai/oauth/start
-POST /api/v1/providers/openai/oauth/complete
 POST /api/v1/providers/openai/oauth/cancel
 POST /api/v1/providers/openai/logout
 ```
 
-`oauth/start` 接受 `{ "method": "browser" }` 或 `{ "method": "device" }`，省略時預設為 `browser`。
+`oauth/start` 固定啟動 device-code 流程，不接受瀏覽器或 callback 模式。
 
 WebSocket 事件：
 

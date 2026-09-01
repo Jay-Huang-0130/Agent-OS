@@ -48,11 +48,9 @@ describe("AgentClient", () => {
         authenticated: true, csrfToken: "csrf-test", user: { id: "owner", displayName: "Owner", initials: "OW" },
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        type: "browser",
         loginId: "8d1e249e-57a0-47cb-af4d-1e55b71fbf40",
-        authUrl: "https://auth.openai.com/oauth/authorize",
-        openedOnAgentWeb: true,
-        humanUrl: "https://192.168.1.2:6901/",
+        verificationUrl: "https://auth.openai.com/codex/device",
+        userCode: "ABCD-1234",
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new AgentClient();
@@ -60,20 +58,11 @@ describe("AgentClient", () => {
 
     const login = await client.startOpenAIOAuth();
 
-    expect(login.type).toBe("browser");
-    expect(login.type === "browser" && login.openedOnAgentWeb).toBe(true);
+    expect(login.userCode).toBe("ABCD-1234");
     const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
     expect(path).toBe("/api/v1/providers/openai/oauth/start");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({ method: "browser" });
+    expect(init.body).toBeUndefined();
     expect(new Headers(init.headers).get("x-csrf-token")).toBe("csrf-test");
-
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
-    const redirectUrl = "http://localhost:1455/auth/callback?code=secret&state=test";
-    await client.completeOpenAIOAuth(redirectUrl);
-    const [completePath, completeInit] = fetchMock.mock.calls[3] as [string, RequestInit];
-    expect(completePath).toBe("/api/v1/providers/openai/oauth/complete");
-    expect(JSON.parse(String(completeInit.body))).toEqual({ redirectUrl });
-    expect(new Headers(completeInit.headers).get("x-csrf-token")).toBe("csrf-test");
   });
 });

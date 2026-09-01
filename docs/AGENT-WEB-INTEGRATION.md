@@ -96,9 +96,6 @@ READY=true
 HUMAN_CONTROL_PROTOCOL=novnc
 AGENT_CONTROL_AVAILABLE=false
 AGENT_CONTROL_PROTOCOL=none
-OPENAI_OAUTH_BROWSER_AVAILABLE=true
-OPENAI_OAUTH_BROWSER_PROTOCOL=agent-web-openai-oauth-v1
-OPENAI_OAUTH_BROWSER_SOCKET=/run/agent-web-oauth/open.sock
 ```
 
 解析規則：
@@ -107,8 +104,7 @@ OPENAI_OAUTH_BROWSER_SOCKET=/run/agent-web-oauth/open.sock
 - 忽略未來新增的 Key。
 - `READY=true` 才能把 Browser capability 標記為健康。
 - `AGENT_CONTROL_AVAILABLE=false` 時，Agent Runtime 不得假裝能自動操作。
-- `OPENAI_OAUTH_BROWSER_AVAILABLE=true` 只允許 Agent-OS 將官方 OpenAI OAuth URL 開到既有 Chromium，以便 loopback callback 在樹莓派本機完成。
-- Gateway 只連接固定的 `/run/agent-web-oauth/open.sock`；Socket 權限為 `0600`，且接收端會再次限制官方 OpenAI/ChatGPT HTTPS 網域。
+- OpenAI 登入不依賴 Agent Web；Agent-OS 使用 device-code 流程，讓使用者在操作 Web UI 的瀏覽器完成授權。
 - noVNC URL 是人類介面，不是 Agent Token 或機器控制 API。
 
 ## 安裝冪等性

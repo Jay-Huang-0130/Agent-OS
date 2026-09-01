@@ -15,7 +15,6 @@ import {
   setSessionCookie,
   verifyPassword,
 } from "./auth.js";
-import { AgentWebOAuthBrowser, type OpenAIOAuthBrowser } from "./agentWeb.js";
 import type { GatewayConfig } from "./config.js";
 import { publicDeviceName } from "./config.js";
 import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
@@ -36,9 +35,7 @@ const setupSchema = z.object({
 }).strict();
 
 const loginSchema = z.object({ password: z.string().min(1).max(256) }).strict();
-const startProviderLoginSchema = z.object({ method: z.enum(["browser", "device"]).default("browser") }).strict().default({});
 const cancelProviderLoginSchema = z.object({ loginId: z.string().uuid() }).strict();
-const completeProviderLoginSchema = z.object({ redirectUrl: z.string().url().max(8_192) }).strict();
 
 type Settings = z.infer<typeof settingsSchema>;
 type EventSocket = {
@@ -55,7 +52,6 @@ interface LoginAttempt {
 export interface BuildAppOptions {
   logger?: boolean;
   openAIAuth?: OpenAIAuthService;
-  openAIOAuthBrowser?: OpenAIOAuthBrowser;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -157,7 +153,6 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     }
   };
   const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
-  const openAIOAuthBrowser = options.openAIOAuthBrowser ?? new AgentWebOAuthBrowser();
   const stopOpenAIUpdates = openAIAuth.onUpdate((status) => {
     broadcast({ type: "provider.openai.updated", data: status });
   });
@@ -313,37 +308,13 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   app.post("/api/v1/providers/openai/oauth/start", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
-    const parsed = startProviderLoginSchema.safeParse(request.body);
-    if (!parsed.success) return apiError(reply, 400, "invalid_login_method", "Choose browser or device authorization.");
     try {
-      const login = parsed.data.method === "device"
-        ? await openAIAuth.startDeviceLogin()
-        : await openAIAuth.startBrowserLogin();
-      addActivity("settings", "OpenAI sign-in started", `${session.displayName} started secure ${parsed.data.method} authorization.`);
-      if (login.type === "browser") {
-        const launch = await openAIOAuthBrowser.open(login.authUrl);
-        return { ...login, ...launch };
-      }
+      const login = await openAIAuth.startDeviceLogin();
+      addActivity("settings", "OpenAI sign-in started", `${session.displayName} started secure device authorization.`);
       return login;
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : "OpenAI sign-in could not be started.";
       return apiError(reply, 503, "openai_login_unavailable", message);
-    }
-  });
-
-  app.post("/api/v1/providers/openai/oauth/complete", async (request, reply) => {
-    const session = requireSession(request, reply, database);
-    if (!session || !requireCsrf(request, reply, session)) return;
-    const parsed = completeProviderLoginSchema.safeParse(request.body);
-    if (!parsed.success) return apiError(reply, 400, "invalid_callback_url", "Paste the complete OpenAI callback URL.");
-    try {
-      await openAIAuth.completeBrowserLogin(parsed.data.redirectUrl);
-      // Never store the callback URL: it contains a short-lived authorization code.
-      addActivity("settings", "OpenAI callback received", `${session.displayName} returned the browser authorization to this device.`);
-      return reply.code(204).send();
-    } catch (error) {
-      const message = error instanceof Error ? error.message.slice(0, 500) : "The OpenAI callback could not be completed.";
-      return apiError(reply, 400, "openai_callback_failed", message);
     }
   });
 

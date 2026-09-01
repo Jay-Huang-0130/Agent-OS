@@ -14,26 +14,15 @@ export interface OpenAIConnection {
   error?: string;
 }
 
-export interface OpenAIBrowserLogin {
-  type: "browser";
-  loginId: string;
-  authUrl: string;
-}
-
 export interface OpenAIDeviceLogin {
-  type: "device";
   loginId: string;
   verificationUrl: string;
   userCode: string;
 }
 
-export type OpenAIOAuthLogin = OpenAIBrowserLogin | OpenAIDeviceLogin;
-
 export interface OpenAIAuthService {
   status(refresh?: boolean): Promise<OpenAIConnection>;
-  startBrowserLogin(): Promise<OpenAIBrowserLogin>;
   startDeviceLogin(): Promise<OpenAIDeviceLogin>;
-  completeBrowserLogin(redirectUrl: string): Promise<void>;
   cancelLogin(loginId: string): Promise<void>;
   logout(): Promise<void>;
   onUpdate(listener: (status: OpenAIConnection) => void): () => void;
@@ -47,61 +36,9 @@ type PendingRequest = {
   timer: NodeJS.Timeout;
 };
 
-type ActiveLogin = {
-  loginId: string;
-  method: "browser" | "device";
-  authUrl?: string;
-};
-
 function safeMessage(value: unknown): string {
   const message = value instanceof Error ? value.message : String(value ?? "Unknown Codex error");
   return message.replace(/[\r\n]+/gu, " ").slice(0, 500);
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
-}
-
-function expectedLoopbackCallback(authUrl: string): { redirect: URL; state: string } {
-  const authorization = new URL(authUrl);
-  const redirectValue = authorization.searchParams.get("redirect_uri");
-  const state = authorization.searchParams.get("state");
-  if (!redirectValue || !state) {
-    throw new Error("Codex did not provide a verifiable browser callback.");
-  }
-  const redirect = new URL(redirectValue);
-  if (redirect.protocol !== "http:" || !isLoopbackHostname(redirect.hostname)) {
-    throw new Error("Codex did not provide a safe loopback callback.");
-  }
-  return { redirect, state };
-}
-
-/**
- * Validate a browser-returned redirect before the Gateway forwards it to the
- * Codex loopback listener. This deliberately requires the exact callback
- * origin, path and OAuth state from the active authorization URL.
- */
-export function validateLoopbackOAuthCallback(authUrl: string, redirectUrl: string): URL {
-  const { redirect: expected, state: expectedState } = expectedLoopbackCallback(authUrl);
-  const actual = new URL(redirectUrl);
-  if (
-    actual.protocol !== expected.protocol
-    || actual.hostname !== expected.hostname
-    || actual.port !== expected.port
-    || actual.pathname !== expected.pathname
-    || actual.username
-    || actual.password
-    || actual.hash
-  ) {
-    throw new Error("Only the callback URL created for this OpenAI sign-in can be submitted.");
-  }
-  if (actual.searchParams.get("state") !== expectedState) {
-    throw new Error("The OpenAI callback state does not match this sign-in.");
-  }
-  if (!actual.searchParams.has("code") && !actual.searchParams.has("error")) {
-    throw new Error("Paste the complete callback URL from the browser address bar.");
-  }
-  return actual;
 }
 
 export class CodexAuthBridge implements OpenAIAuthService {
@@ -111,7 +48,7 @@ export class CodexAuthBridge implements OpenAIAuthService {
   private stdoutBuffer = "";
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
-  private activeLogin: ActiveLogin | undefined;
+  private activeLoginId: string | undefined;
   private shuttingDown = false;
 
   constructor(private readonly config: GatewayConfig) {}
@@ -199,7 +136,7 @@ export class CodexAuthBridge implements OpenAIAuthService {
     const params = (message.params ?? {}) as Record<string, unknown>;
     if (message.method === "account/login/completed") {
       const completedId = typeof params.loginId === "string" ? params.loginId : undefined;
-      if (!completedId || completedId === this.activeLogin?.loginId) this.activeLogin = undefined;
+      if (!completedId || completedId === this.activeLoginId) this.activeLoginId = undefined;
       if (params.success === false) {
         this.publish({ available: true, state: "error", authMode: null, error: safeMessage(params.error) });
       } else {
@@ -246,7 +183,7 @@ export class CodexAuthBridge implements OpenAIAuthService {
       if (!account) {
         return this.publish({
           available: true,
-          state: this.activeLogin ? "connecting" : "disconnected",
+          state: this.activeLoginId ? "connecting" : "disconnected",
           authMode: null,
         });
       }
@@ -267,30 +204,9 @@ export class CodexAuthBridge implements OpenAIAuthService {
     }
   }
 
-  async startBrowserLogin(): Promise<OpenAIBrowserLogin> {
-    await this.ensureStarted();
-    if (this.activeLogin) throw new Error("An OpenAI sign-in is already in progress.");
-    const result = await this.request("account/login/start", {
-      type: "chatgpt",
-      useHostedLoginSuccessPage: true,
-      appBrand: "chatgpt",
-    }, 30_000);
-    const loginId = result.loginId;
-    const authUrl = result.authUrl;
-    if (typeof loginId !== "string" || typeof authUrl !== "string") {
-      throw new Error("Codex returned an invalid OpenAI browser login response.");
-    }
-    // Reject an unverifiable callback up front instead of discovering it after
-    // the user has completed authorization in another browser.
-    expectedLoopbackCallback(authUrl);
-    this.activeLogin = { loginId, method: "browser", authUrl };
-    this.publish({ available: true, state: "connecting", authMode: null });
-    return { type: "browser", loginId, authUrl };
-  }
-
   async startDeviceLogin(): Promise<OpenAIDeviceLogin> {
     await this.ensureStarted();
-    if (this.activeLogin) throw new Error("An OpenAI sign-in is already in progress.");
+    if (this.activeLoginId) throw new Error("An OpenAI sign-in is already in progress.");
     const result = await this.request("account/login/start", { type: "chatgptDeviceCode" }, 30_000);
     const loginId = result.loginId;
     const verificationUrl = result.verificationUrl;
@@ -298,45 +214,22 @@ export class CodexAuthBridge implements OpenAIAuthService {
     if (typeof loginId !== "string" || typeof verificationUrl !== "string" || typeof userCode !== "string") {
       throw new Error("Codex returned an invalid OpenAI device login response.");
     }
-    this.activeLogin = { loginId, method: "device" };
+    this.activeLoginId = loginId;
     this.publish({ available: true, state: "connecting", authMode: null });
-    return { type: "device", loginId, verificationUrl, userCode };
-  }
-
-  async completeBrowserLogin(redirectUrl: string): Promise<void> {
-    const active = this.activeLogin;
-    if (!active || active.method !== "browser" || !active.authUrl) {
-      throw new Error("There is no browser sign-in waiting for a callback.");
-    }
-    const callback = validateLoopbackOAuthCallback(active.authUrl, redirectUrl);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-    try {
-      const response = await fetch(callback, { redirect: "manual", signal: controller.signal });
-      if (response.status >= 400) {
-        throw new Error("Codex rejected the OpenAI callback. Start a new sign-in and try again.");
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error("The local Codex callback timed out.");
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
+    return { loginId, verificationUrl, userCode };
   }
 
   async cancelLogin(loginId: string): Promise<void> {
     await this.ensureStarted();
     await this.request("account/login/cancel", { loginId });
-    if (this.activeLogin?.loginId === loginId) this.activeLogin = undefined;
+    if (this.activeLoginId === loginId) this.activeLoginId = undefined;
     await this.status(false);
   }
 
   async logout(): Promise<void> {
     await this.ensureStarted();
     await this.request("account/logout", {});
-    this.activeLogin = undefined;
+    this.activeLoginId = undefined;
     this.publish({ available: true, state: "disconnected", authMode: null });
   }
 

@@ -193,11 +193,11 @@ bash ./install.sh --force-agent-web-update
 - [VISION.md](VISION.md)：Agent-OS 的完整產品願景。
 - [Phase 0–2 實作說明](docs/PHASE-0-2.md)：支援平台、隔離方式、API、安全與安裝流程。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
-- [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、瀏覽器登入、遠端 callback 回送、隔離與 API。
+- [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、headless 裝置代碼登入、隔離與 API。
 
 ## 專案狀態
 
-目前版本建立的是可以實際執行的安裝與能力管理 foundation，不代表完整 Agent-OS 已完成。Phase 3 已完成 OpenAI OAuth 連線基礎：設定頁預設啟動 ChatGPT 瀏覽器 OAuth，支援樹莓派本機 callback、遠端 callback 安全回送、device-code 備援、連線狀態、取消登入與登出。OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
+目前版本建立的是可以實際執行的安裝與能力管理 foundation，不代表完整 Agent-OS 已完成。Phase 3 已完成 OpenAI OAuth 連線基礎：設定頁啟動適合樹莓派與遠端伺服器的 ChatGPT device-code 流程，使用者在操作 Agent-OS Web UI 的瀏覽器完成登入，不需要樹莓派 GUI、虛擬瀏覽器或 localhost callback。流程包含連線狀態、取消登入與登出；OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
 
 後續建議依序實作：
 
