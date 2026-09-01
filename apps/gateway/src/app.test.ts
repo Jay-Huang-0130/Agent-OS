@@ -195,3 +195,114 @@ test("OpenAI device authorization requires the owner session and CSRF", async ()
   });
   assert.equal(logout.statusCode, 204);
 });
+
+test("owner can create and control durable Projects and Goals", async () => {
+  const { app, config } = await fixture();
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" },
+  });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const csrfToken = session.json().csrfToken as string;
+  const writeHeaders = { cookie, "x-csrf-token": csrfToken };
+
+  const anonymous = await app.inject({ method: "GET", url: "/api/v1/goals" });
+  assert.equal(anonymous.statusCode, 401);
+  const noCsrf = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    payload: { name: "Agent-OS" },
+    headers: { cookie },
+  });
+  assert.equal(noCsrf.statusCode, 403);
+
+  const project = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    headers: { ...writeHeaders, "idempotency-key": "create-agent-os-project" },
+    payload: { name: "Agent-OS", description: "Responsibility Kernel" },
+  });
+  assert.equal(project.statusCode, 201);
+  const projectId = project.json().id as string;
+  const projectReplay = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    headers: { ...writeHeaders, "idempotency-key": "create-agent-os-project" },
+    payload: { name: "Agent-OS", description: "Responsibility Kernel" },
+  });
+  assert.equal(projectReplay.json().id, projectId);
+  const projectConflict = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    headers: { ...writeHeaders, "idempotency-key": "create-agent-os-project" },
+    payload: { name: "Different project" },
+  });
+  assert.equal(projectConflict.statusCode, 409);
+
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/v1/goals",
+    headers: { ...writeHeaders, "idempotency-key": "accept-phase-3" },
+    payload: {
+      projectId,
+      title: "Complete Phase 3",
+      desiredOutcome: "The responsibility kernel is durable.",
+      agentCommitment: ["Preserve state across restarts."],
+      completionCriteria: ["All Phase 3 tests pass."],
+      autonomy: "ACT_WITHIN_POLICY",
+    },
+  });
+  assert.equal(accepted.statusCode, 201);
+  assert.equal(accepted.json().status, "ACTIVE");
+  assert.deepEqual(accepted.json().contract.completionCriteria, ["All Phase 3 tests pass."]);
+  const goalId = accepted.json().id as string;
+
+  const listed = await app.inject({
+    method: "GET",
+    url: `/api/v1/goals?projectId=${projectId}&status=ACTIVE`,
+    headers: { cookie },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().length, 1);
+
+  const paused = await app.inject({
+    method: "POST",
+    url: `/api/v1/goals/${goalId}/pause`,
+    headers: { ...writeHeaders, "idempotency-key": "pause-phase-3" },
+    payload: { reason: "Deployment window" },
+  });
+  assert.equal(paused.statusCode, 200);
+  assert.equal(paused.json().status, "WAITING");
+  const resumed = await app.inject({
+    method: "POST",
+    url: `/api/v1/goals/${goalId}/resume`,
+    headers: writeHeaders,
+    payload: {},
+  });
+  assert.equal(resumed.statusCode, 200);
+  assert.equal(resumed.json().status, "ACTIVE");
+
+  const cancelled = await app.inject({
+    method: "POST",
+    url: `/api/v1/goals/${goalId}/cancel`,
+    headers: writeHeaders,
+    payload: { reason: "Owner changed direction" },
+  });
+  assert.equal(cancelled.statusCode, 200);
+  assert.equal(cancelled.json().status, "CANCELLED");
+  const events = await app.inject({
+    method: "GET",
+    url: `/api/v1/goals/${goalId}/events`,
+    headers: { cookie },
+  });
+  assert.deepEqual(events.json().map((event: { type: string }) => event.type), [
+    "goal.accepted",
+    "goal.paused",
+    "goal.resumed",
+    "goal.cancelled",
+  ]);
+});

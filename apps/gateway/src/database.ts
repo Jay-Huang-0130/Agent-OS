@@ -28,23 +28,17 @@ export interface ActivityRecord {
   createdAt: string;
 }
 
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : String(value ?? "");
+interface Migration {
+  version: number;
+  name: string;
+  sql: string;
 }
 
-export class AgentDatabase {
-  readonly db: DatabaseSync;
-
-  constructor(path: string) {
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    this.db = new DatabaseSync(path, { timeout: 5_000 });
-    this.db.exec("PRAGMA foreign_keys = ON;");
-    if (path !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL;");
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
+const migrations: Migration[] = [
+  {
+    version: 1,
+    name: "phase_0_2_foundation",
+    sql: `
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         display_name TEXT NOT NULL,
@@ -78,7 +72,308 @@ export class AgentDatabase {
 
       CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
       CREATE INDEX IF NOT EXISTS activity_created_at_idx ON activity_events(created_at DESC);
+    `,
+  },
+  {
+    version: 2,
+    name: "phase_3_responsibility_kernel",
+    sql: `
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'ARCHIVED')),
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_user_id, idempotency_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS goals (
+        id TEXT PRIMARY KEY,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        title TEXT NOT NULL,
+        desired_outcome TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'INBOX', 'CLARIFYING', 'PLANNING', 'ACTIVE', 'WAITING', 'WAITING_AUTH',
+          'NEEDS_APPROVAL', 'RETRYING', 'BLOCKED', 'COMPLETED', 'CANCELLED'
+        )),
+        state_reason TEXT,
+        autonomy TEXT NOT NULL CHECK (autonomy IN (
+          'OBSERVE', 'PREPARE', 'ASK_BEFORE_ACT', 'ACT_WITHIN_POLICY', 'FULLY_AUTOMATED'
+        )),
+        current_version INTEGER NOT NULL DEFAULT 1 CHECK (current_version > 0),
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT,
+        cancelled_at TEXT,
+        UNIQUE(owner_user_id, idempotency_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS goal_versions (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version > 0),
+        contract_json TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(goal_id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS commitments (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        owner TEXT NOT NULL CHECK (owner IN ('USER', 'AGENT_OS', 'EXTERNAL_PARTY')),
+        owed_to TEXT NOT NULL CHECK (owed_to IN ('USER', 'AGENT_OS', 'EXTERNAL_PARTY')),
+        promise TEXT NOT NULL,
+        due_at TEXT,
+        status TEXT NOT NULL CHECK (status IN ('OPEN', 'WAITING', 'FULFILLED', 'BROKEN', 'CANCELLED')),
+        follow_up_policy TEXT,
+        evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS plans (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version > 0),
+        status TEXT NOT NULL CHECK (status IN ('DRAFT', 'ACTIVE', 'SUPERSEDED', 'COMPLETED', 'CANCELLED')),
+        plan_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(goal_id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        plan_id TEXT REFERENCES plans(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'PENDING', 'READY', 'LEASED', 'RUNNING', 'WAITING', 'WAITING_AUTH',
+          'VERIFYING', 'COMPLETED', 'FAILED', 'BLOCKED', 'CANCELLED'
+        )),
+        position INTEGER NOT NULL DEFAULT 0,
+        specification_json TEXT NOT NULL DEFAULT '{}',
+        result_json TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(goal_id, idempotency_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS runs (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        worker_id TEXT,
+        status TEXT NOT NULL CHECK (status IN (
+          'QUEUED', 'RUNNING', 'WAITING', 'VERIFYING', 'COMPLETED', 'FAILED', 'INTERRUPTED', 'CANCELLED'
+        )),
+        attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt > 0),
+        checkpoint_json TEXT,
+        result_json TEXT,
+        error_json TEXT,
+        usage_json TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+        goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
+        aggregate_type TEXT NOT NULL,
+        aggregate_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL CHECK (sequence > 0),
+        type TEXT NOT NULL,
+        data_json TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        UNIQUE(aggregate_type, aggregate_id, sequence)
+      );
+
+      CREATE TABLE IF NOT EXISTS wake_conditions (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN (
+          'TIME', 'INTERVAL', 'EVENT', 'WEBHOOK', 'USER_INPUT', 'APPROVAL_GRANTED',
+          'AUTH_COMPLETED', 'NETWORK_RECOVERED', 'DEADLINE_NEAR'
+        )),
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'CLAIMED', 'CONSUMED', 'CANCELLED')),
+        due_at TEXT,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        misfire_policy TEXT NOT NULL CHECK (misfire_policy IN (
+          'RUN_ONCE_NOW', 'RUN_LATEST_ONLY', 'RUN_ALL', 'SKIP_AND_RESUME', 'REPLAN'
+        )),
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        consumed_at TEXT,
+        UNIQUE(goal_id, idempotency_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS leases (
+        resource_type TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        holder_id TEXT NOT NULL,
+        token TEXT NOT NULL UNIQUE,
+        acquired_at TEXT NOT NULL,
+        renewed_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        PRIMARY KEY(resource_type, resource_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS outbox (
+        id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL REFERENCES events(id) ON DELETE RESTRICT,
+        topic TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'PUBLISHED', 'FAILED')),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        available_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        published_at TEXT,
+        last_error TEXT,
+        idempotency_key TEXT NOT NULL UNIQUE
+      );
+
+      CREATE TABLE IF NOT EXISTS approvals (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        action_json TEXT NOT NULL,
+        risk TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CANCELLED')),
+        requested_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT,
+        decision_reason TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS artifact_refs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+        goal_id TEXT REFERENCES goals(id) ON DELETE CASCADE,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL,
+        uri TEXT NOT NULL,
+        sha256 TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        CHECK (project_id IS NOT NULL OR goal_id IS NOT NULL OR task_id IS NOT NULL)
+      );
+
+      CREATE TABLE IF NOT EXISTS idempotency_records (
+        scope TEXT NOT NULL,
+        key TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        resource_type TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(scope, key)
+      );
+
+      CREATE INDEX IF NOT EXISTS projects_owner_status_idx ON projects(owner_user_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS goals_owner_status_idx ON goals(owner_user_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS goals_project_idx ON goals(project_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS commitments_goal_status_idx ON commitments(goal_id, status, due_at);
+      CREATE INDEX IF NOT EXISTS tasks_goal_status_idx ON tasks(goal_id, status, position);
+      CREATE INDEX IF NOT EXISTS runs_task_created_idx ON runs(task_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS events_goal_sequence_idx ON events(goal_id, sequence);
+      CREATE INDEX IF NOT EXISTS events_aggregate_idx ON events(aggregate_type, aggregate_id, sequence);
+      CREATE INDEX IF NOT EXISTS wakes_due_idx ON wake_conditions(status, due_at);
+      CREATE INDEX IF NOT EXISTS leases_expires_idx ON leases(expires_at);
+      CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox(status, available_at, created_at);
+      CREATE INDEX IF NOT EXISTS approvals_goal_status_idx ON approvals(goal_id, status);
+      CREATE INDEX IF NOT EXISTS artifacts_goal_idx ON artifact_refs(goal_id, created_at);
+
+      CREATE TRIGGER IF NOT EXISTS events_append_only_update
+      BEFORE UPDATE ON events
+      BEGIN
+        SELECT RAISE(ABORT, 'events are append-only');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS events_append_only_delete
+      BEFORE DELETE ON events
+      BEGIN
+        SELECT RAISE(ABORT, 'events are append-only');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS goal_versions_immutable_update
+      BEFORE UPDATE ON goal_versions
+      BEGIN
+        SELECT RAISE(ABORT, 'goal versions are immutable');
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS goal_versions_immutable_delete
+      BEFORE DELETE ON goal_versions
+      BEGIN
+        SELECT RAISE(ABORT, 'goal versions are immutable');
+      END;
+    `,
+  },
+];
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : String(value ?? "");
+}
+
+export class AgentDatabase {
+  readonly db: DatabaseSync;
+
+  constructor(path: string) {
+    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    this.db = new DatabaseSync(path, { timeout: 5_000 });
+    this.db.exec("PRAGMA foreign_keys = ON;");
+    if (path !== ":memory:") this.db.exec("PRAGMA journal_mode = WAL;");
+    this.migrate();
+  }
+
+  private migrate(): void {
+    this.db.exec(`
+      BEGIN IMMEDIATE;
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+      COMMIT;
     `);
+
+    for (const migration of migrations) {
+      const applied = this.db
+        .prepare("SELECT 1 FROM schema_migrations WHERE version = ?")
+        .get(migration.version);
+      if (applied) continue;
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec(migration.sql);
+        this.db
+          .prepare("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)")
+          .run(migration.version, migration.name, new Date().toISOString());
+        this.db.exec(`PRAGMA user_version = ${migration.version}`);
+        this.db.exec("COMMIT");
+      } catch (error) {
+        this.db.exec("ROLLBACK");
+        throw error;
+      }
+    }
+  }
+
+  migrationVersions(): number[] {
+    const rows = this.db.prepare("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{
+      version: number;
+    }>;
+    return rows.map((row) => Number(row.version));
   }
 
   hasOwner(): boolean {

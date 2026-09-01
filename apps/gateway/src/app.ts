@@ -20,6 +20,12 @@ import { publicDeviceName } from "./config.js";
 import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
 import { AgentDatabase, type ActivityRecord } from "./database.js";
 import { collectSystemStatus } from "./metrics.js";
+import {
+  autonomyLevels,
+  goalStatuses,
+  KernelError,
+  ResponsibilityKernel,
+} from "./responsibilityKernel.js";
 
 const settingsSchema = z.object({
   deviceName: z.string().trim().min(1).max(64),
@@ -36,6 +42,32 @@ const setupSchema = z.object({
 
 const loginSchema = z.object({ password: z.string().min(1).max(256) }).strict();
 const cancelProviderLoginSchema = z.object({ loginId: z.string().uuid() }).strict();
+const createProjectSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(4_000).optional(),
+}).strict();
+const createGoalSchema = z.object({
+  projectId: z.string().uuid().optional(),
+  title: z.string().trim().min(1).max(240),
+  desiredOutcome: z.string().trim().min(1).max(8_000),
+  agentCommitment: z.array(z.string().trim().min(1).max(2_000)).max(100).optional(),
+  completionCriteria: z.array(z.string().trim().min(1).max(2_000)).min(1).max(100),
+  cancellationCriteria: z.array(z.string().trim().min(1).max(2_000)).max(100).optional(),
+  externalDependencies: z.array(z.string().trim().min(1).max(2_000)).max(100).optional(),
+  constraints: z.record(z.unknown()).optional(),
+  priority: z.record(z.unknown()).optional(),
+  attentionPolicy: z.record(z.unknown()).optional(),
+  budget: z.record(z.unknown()).optional(),
+  autonomy: z.enum(autonomyLevels).optional(),
+}).strict();
+const goalActionSchema = z.object({ reason: z.string().trim().min(1).max(2_000).optional() }).strict();
+const listGoalsQuerySchema = z.object({
+  projectId: z.string().uuid().optional(),
+  status: z.enum(goalStatuses).optional(),
+}).strict();
+const eventQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+}).strict();
 
 type Settings = z.infer<typeof settingsSchema>;
 type EventSocket = {
@@ -56,6 +88,22 @@ export interface BuildAppOptions {
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
   return reply.code(status).send({ code, message });
+}
+
+function kernelApiError(reply: FastifyReply, error: unknown) {
+  if (!(error instanceof KernelError)) throw error;
+  const status = error.code === "not_found" ? 404 : error.code === "completion_evidence_required" ? 422 : 409;
+  return apiError(reply, status, error.code, error.message);
+}
+
+function idempotencyKey(request: FastifyRequest, reply: FastifyReply): string | undefined {
+  const value = request.headers["idempotency-key"];
+  if (value === undefined) return undefined;
+  if (Array.isArray(value) || value.length < 1 || value.length > 200) {
+    apiError(reply, 400, "invalid_idempotency_key", "Idempotency-Key must contain 1 to 200 characters.");
+    return "";
+  }
+  return value;
 }
 
 function normalizePairingCode(value: string): string {
@@ -138,6 +186,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     ...(https ? { https } : {}),
   });
   const database = new AgentDatabase(config.databasePath);
+  const kernel = new ResponsibilityKernel(database);
   const sockets = new Set<EventSocket>();
   const loginAttempts = new Map<string, LoginAttempt>();
   const pairingCode = database.hasOwner() ? undefined : ensurePairingCode(config.pairingCodePath);
@@ -298,6 +347,105 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     addActivity("settings", "Settings updated", `${session.displayName} changed device settings.`);
     broadcast({ type: "settings.updated", data: parsed.data });
     return parsed.data;
+  });
+
+  app.post("/api/v1/projects", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = createProjectSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_project", "Project name or description is invalid.");
+    try {
+      const project = kernel.createProject(session.userId, parsed.data, key);
+      broadcast({ type: "project.created", data: project });
+      return reply.code(201).send(project);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/projects", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return kernel.listProjects(session.userId);
+  });
+
+  app.post("/api/v1/goals", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = createGoalSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return apiError(reply, 400, "invalid_goal", "A Goal needs a title, desired outcome and completion criteria.");
+    }
+    try {
+      const goal = kernel.createGoal(session.userId, parsed.data, key);
+      broadcast({ type: "goal.accepted", data: goal });
+      return reply.code(201).send(goal);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/goals", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const parsed = listGoalsQuerySchema.safeParse(request.query);
+    if (!parsed.success) return apiError(reply, 400, "invalid_goal_filter", "Goal filters are invalid.");
+    return kernel.listGoals(session.userId, parsed.data);
+  });
+
+  app.get<{ Params: { id: string } }>("/api/v1/goals/:id", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    try {
+      return kernel.getGoal(request.params.id, session.userId);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  const goalAction = (action: "pause" | "resume" | "cancel") => async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = goalActionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return apiError(reply, 400, "invalid_goal_action", "The Goal action is invalid.");
+    try {
+      const reason = parsed.data.reason;
+      const goal = action === "pause"
+        ? kernel.pauseGoal(request.params.id, session.userId, reason, key)
+        : action === "resume"
+          ? kernel.resumeGoal(request.params.id, session.userId, reason, key)
+          : kernel.cancelGoal(request.params.id, session.userId, reason, key);
+      const eventType = action === "pause" ? "goal.paused" : action === "resume" ? "goal.resumed" : "goal.cancelled";
+      broadcast({ type: eventType, data: goal });
+      return goal;
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  };
+
+  app.post<{ Params: { id: string } }>("/api/v1/goals/:id/pause", goalAction("pause"));
+  app.post<{ Params: { id: string } }>("/api/v1/goals/:id/resume", goalAction("resume"));
+  app.post<{ Params: { id: string } }>("/api/v1/goals/:id/cancel", goalAction("cancel"));
+
+  app.get<{ Params: { id: string } }>("/api/v1/goals/:id/events", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const parsed = eventQuerySchema.safeParse(request.query);
+    if (!parsed.success) return apiError(reply, 400, "invalid_event_filter", "Event filters are invalid.");
+    try {
+      return kernel.listGoalEvents(request.params.id, session.userId, parsed.data.limit);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
   });
 
   app.get("/api/v1/providers/openai", async (request, reply) => {
