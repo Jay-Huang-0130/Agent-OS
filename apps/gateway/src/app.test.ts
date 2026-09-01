@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
+import type { OpenAIOAuthBrowser } from "./agentWeb.js";
 import type { OpenAIAuthService, OpenAIConnection } from "./codexAuth.js";
 import { loadConfig } from "./config.js";
 
@@ -14,7 +15,7 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-async function fixture(openAIAuth?: OpenAIAuthService) {
+async function fixture(openAIAuth?: OpenAIAuthService, openAIOAuthBrowser?: OpenAIOAuthBrowser) {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-gateway-"));
   const config = loadConfig({
     stateDir,
@@ -22,9 +23,20 @@ async function fixture(openAIAuth?: OpenAIAuthService) {
     pairingCodePath: join(stateDir, "pairing-code"),
     webDistPath: join(stateDir, "missing-web"),
   });
-  const app = await buildApp(config, openAIAuth ? { openAIAuth } : {});
+  const app = await buildApp(config, {
+    ...(openAIAuth ? { openAIAuth } : {}),
+    ...(openAIOAuthBrowser ? { openAIOAuthBrowser } : {}),
+  });
   apps.push(app);
   return { app, config };
+}
+
+class FakeOpenAIOAuthBrowser implements OpenAIOAuthBrowser {
+  openedUrl: string | undefined;
+  async open(authUrl: string) {
+    this.openedUrl = authUrl;
+    return { openedOnAgentWeb: true, humanUrl: "https://192.168.1.2:6901/" };
+  }
 }
 
 class FakeOpenAIAuth implements OpenAIAuthService {
@@ -161,7 +173,8 @@ test("authenticated websocket receives an initial system status snapshot", async
 
 test("OpenAI browser OAuth endpoints require the owner session and CSRF", async () => {
   const provider = new FakeOpenAIAuth();
-  const { app, config } = await fixture(provider);
+  const oauthBrowser = new FakeOpenAIOAuthBrowser();
+  const { app, config } = await fixture(provider, oauthBrowser);
   const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
   const setup = await app.inject({
     method: "POST",
@@ -190,6 +203,9 @@ test("OpenAI browser OAuth endpoints require the owner session and CSRF", async 
   assert.equal(started.statusCode, 200);
   assert.equal(started.json().type, "browser");
   assert.match(started.json().authUrl, /^https:\/\/auth\.openai\.com\//u);
+  assert.equal(started.json().openedOnAgentWeb, true);
+  assert.equal(started.json().humanUrl, "https://192.168.1.2:6901/");
+  assert.equal(oauthBrowser.openedUrl, started.json().authUrl);
 
   const callbackUrl = "http://localhost:1455/auth/callback?code=secret-code&state=test-state";
   const callbackWithoutCsrf = await app.inject({

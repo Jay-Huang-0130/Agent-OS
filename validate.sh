@@ -17,6 +17,7 @@ required_files=(
     config/components.env
     config/release.env
     apps/gateway/package.json
+    apps/gateway/src/agentWeb.ts
     apps/gateway/src/server.ts
     apps/web/package.json
     apps/web/src/main.tsx
@@ -27,6 +28,7 @@ required_files=(
     scripts/agent-osctl
     systemd/agent-os.service.in
     docs/AGENT-WEB-INTEGRATION.md
+    docs/OPENAI-OAUTH.md
 )
 for required_file in "${required_files[@]}"; do
     [[ -f "$required_file" ]] || {
@@ -41,6 +43,8 @@ done
 
 grep -q 'agent-webctl info' scripts/install-agent-web.sh
 grep -q 'READY' scripts/install-agent-web.sh
+grep -q 'OPENAI_OAUTH_BROWSER_AVAILABLE' scripts/install-agent-web.sh
+grep -q '/run/agent-web-oauth/open.sock' apps/gateway/src/agentWeb.ts
 grep -q -- '--non-interactive' scripts/install-agent-web.sh
 grep -q -- '--password-file' scripts/install-agent-web.sh
 grep -q 'AGENT_OS_AGENT_WEB_PASSWORD_FILE' docs/AGENT-WEB-INTEGRATION.md

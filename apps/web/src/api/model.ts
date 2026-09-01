@@ -73,6 +73,8 @@ export interface OpenAIBrowserLogin {
   type: "browser";
   loginId: string;
   authUrl: string;
+  openedOnAgentWeb: boolean;
+  humanUrl?: string;
 }
 
 export interface OpenAIDeviceLogin {

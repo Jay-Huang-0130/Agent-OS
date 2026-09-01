@@ -51,6 +51,8 @@ describe("AgentClient", () => {
         type: "browser",
         loginId: "8d1e249e-57a0-47cb-af4d-1e55b71fbf40",
         authUrl: "https://auth.openai.com/oauth/authorize",
+        openedOnAgentWeb: true,
+        humanUrl: "https://192.168.1.2:6901/",
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new AgentClient();
@@ -59,6 +61,7 @@ describe("AgentClient", () => {
     const login = await client.startOpenAIOAuth();
 
     expect(login.type).toBe("browser");
+    expect(login.type === "browser" && login.openedOnAgentWeb).toBe(true);
     const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
     expect(path).toBe("/api/v1/providers/openai/oauth/start");
     expect(init.method).toBe("POST");

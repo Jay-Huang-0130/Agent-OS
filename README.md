@@ -115,6 +115,8 @@ rm -f "$HOME/agent-web-password"
 
 密碼至少 4 字元，但 4 字元只適合完全可信任的私人內網。
 
+首次安裝 Agent Web 仍需加上 `--with-agent-web`。之後執行一般 bootstrap 更新時，安裝器會偵測既有 Agent Web 並保留瀏覽器資料、登入狀態與密碼，同時補上 Agent-OS 所需的新相容能力；若要刻意略過，可使用 `--skip-agent-web`。
+
 ## 管理指令
 
 ```bash

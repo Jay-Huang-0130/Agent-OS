@@ -41,7 +41,8 @@ read_agent_web_info() {
 
 agent_web_info=$(read_agent_web_info || true)
 ready=$(printf '%s\n' "$agent_web_info" | info_value READY)
-if [[ "$ready" == true && $force_update -eq 0 ]]; then
+oauth_browser_available=$(printf '%s\n' "$agent_web_info" | info_value OPENAI_OAUTH_BROWSER_AVAILABLE)
+if [[ "$ready" == true && "$oauth_browser_available" == true && $force_update -eq 0 ]]; then
     echo "Agent Web is already installed and ready."
 else
     already_installed=0
@@ -72,13 +73,18 @@ else
         )
     fi
 
-    echo "Installing or repairing the Agent Web browser subsystem..."
+    if [[ "$ready" == true && "$oauth_browser_available" != true ]]; then
+        echo "Updating Agent Web to add automatic OpenAI OAuth callbacks..."
+    else
+        echo "Installing or repairing the Agent Web browser subsystem..."
+    fi
     AGENT_WEB_REPO_URL="$AGENT_OS_AGENT_WEB_REPO_URL" \
         bash "$bootstrap_file" "${install_args[@]}"
 
     agent_web_info=$(read_agent_web_info || true)
     ready=$(printf '%s\n' "$agent_web_info" | info_value READY)
-    if [[ "$ready" != true ]]; then
+    oauth_browser_available=$(printf '%s\n' "$agent_web_info" | info_value OPENAI_OAUTH_BROWSER_AVAILABLE)
+    if [[ "$ready" != true || "$oauth_browser_available" != true ]]; then
         echo "Agent Web installation finished but readiness verification failed." >&2
         printf '%s\n' "$agent_web_info" >&2
         exit 70
@@ -115,4 +121,3 @@ EOF
 chmod 0644 "$state_root/agent-web.env"
 
 echo "Agent Web component verification passed."
-

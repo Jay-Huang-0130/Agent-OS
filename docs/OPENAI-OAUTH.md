@@ -6,12 +6,12 @@ Agent-OS 使用 OpenAI 官方 `@openai/codex` 套件提供的 `codex app-server`
 
 1. 在 Agent-OS 的「設定」頁按下「連接 OpenAI」。
 2. Gateway 透過 Codex app-server 的 `account/login/start` 啟動 `chatgpt` 瀏覽器 OAuth。
-3. Web UI 開啟官方 OpenAI 授權頁。
-4. 若授權頁是在樹莓派上的 Agent Web 瀏覽器開啟，OpenAI 重新導向 `localhost` 後，Codex app-server 會自動接收 callback。
-5. 若授權頁是在其他電腦或手機開啟，重新導向的 `localhost` 屬於該裝置，可能顯示無法連線。此時複製網址列中的完整 callback URL，貼回 Agent-OS；Gateway 會在樹莓派本機把它交給 Codex app-server。
+3. Gateway 透過 Agent Web 的受限本機 Unix Socket，把官方授權頁開在樹莓派上的既有 Chromium；此能力只接受 OpenAI 官方 HTTPS OAuth host，不提供一般網頁控制。
+4. Web UI 開啟 Agent Web noVNC，讓使用者在樹莓派瀏覽器完成登入或 MFA。
+5. OpenAI 重新導向 `localhost` 後仍在同一台樹莓派，因此 Codex app-server 會自動接收 callback，不必複製或貼回網址。
 6. Codex app-server 完成 code exchange、保存 OAuth 資料並處理後續 refresh。
 
-Gateway 只接受目前登入產生的 `http://localhost`、`127.0.0.1` 或 `::1` callback，並驗證完全相同的 port、path 與 OAuth state，避免 callback 回送功能被用來請求其他位址。callback URL 含有短效授權碼，因此不會寫入資料庫、活動細節或日誌。
+舊版 Agent Web 或 Agent Web 不可用時，UI 才會顯示遠端 callback 回送備援。Gateway 只接受目前登入產生的 `http://localhost`、`127.0.0.1` 或 `::1` callback，並驗證完全相同的 port、path 與 OAuth state，避免回送功能被用來請求其他位址。callback URL 含有短效授權碼，因此不會寫入資料庫、活動細節或日誌。
 
 ## 備援：裝置代碼
 

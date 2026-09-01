@@ -15,6 +15,7 @@ import {
   setSessionCookie,
   verifyPassword,
 } from "./auth.js";
+import { AgentWebOAuthBrowser, type OpenAIOAuthBrowser } from "./agentWeb.js";
 import type { GatewayConfig } from "./config.js";
 import { publicDeviceName } from "./config.js";
 import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
@@ -54,6 +55,7 @@ interface LoginAttempt {
 export interface BuildAppOptions {
   logger?: boolean;
   openAIAuth?: OpenAIAuthService;
+  openAIOAuthBrowser?: OpenAIOAuthBrowser;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -155,6 +157,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     }
   };
   const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
+  const openAIOAuthBrowser = options.openAIOAuthBrowser ?? new AgentWebOAuthBrowser();
   const stopOpenAIUpdates = openAIAuth.onUpdate((status) => {
     broadcast({ type: "provider.openai.updated", data: status });
   });
@@ -317,6 +320,10 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
         ? await openAIAuth.startDeviceLogin()
         : await openAIAuth.startBrowserLogin();
       addActivity("settings", "OpenAI sign-in started", `${session.displayName} started secure ${parsed.data.method} authorization.`);
+      if (login.type === "browser") {
+        const launch = await openAIOAuthBrowser.open(login.authUrl);
+        return { ...login, ...launch };
+      }
       return login;
     } catch (error) {
       const message = error instanceof Error ? error.message.slice(0, 500) : "OpenAI sign-in could not be started.";

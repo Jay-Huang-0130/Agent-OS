@@ -35,6 +35,7 @@ Agent-OS 安裝器只保存 Agent Web 的 repository、bootstrap URL、能力版
 Agent-OS bootstrap
     │
     ├─ command -v agent-webctl
+    │      └─ existing install: include Agent Web compatibility update
     │
     ├─ agent-webctl info
     │      └─ READY=true ? reuse : install/repair
@@ -95,6 +96,9 @@ READY=true
 HUMAN_CONTROL_PROTOCOL=novnc
 AGENT_CONTROL_AVAILABLE=false
 AGENT_CONTROL_PROTOCOL=none
+OPENAI_OAUTH_BROWSER_AVAILABLE=true
+OPENAI_OAUTH_BROWSER_PROTOCOL=agent-web-openai-oauth-v1
+OPENAI_OAUTH_BROWSER_SOCKET=/run/agent-web-oauth/open.sock
 ```
 
 解析規則：
@@ -103,6 +107,8 @@ AGENT_CONTROL_PROTOCOL=none
 - 忽略未來新增的 Key。
 - `READY=true` 才能把 Browser capability 標記為健康。
 - `AGENT_CONTROL_AVAILABLE=false` 時，Agent Runtime 不得假裝能自動操作。
+- `OPENAI_OAUTH_BROWSER_AVAILABLE=true` 只允許 Agent-OS 將官方 OpenAI OAuth URL 開到既有 Chromium，以便 loopback callback 在樹莓派本機完成。
+- Gateway 只連接固定的 `/run/agent-web-oauth/open.sock`；Socket 權限為 `0600`，且接收端會再次限制官方 OpenAI/ChatGPT HTTPS 網域。
 - noVNC URL 是人類介面，不是 Agent Token 或機器控制 API。
 
 ## 安裝冪等性

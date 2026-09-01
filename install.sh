@@ -16,6 +16,7 @@ source "$project_root/config/release.env"
 
 force_agent_web_update=0
 skip_agent_web=1
+agent_web_explicitly_skipped=0
 skip_service=0
 session_only=0
 force_tls=0
@@ -27,6 +28,7 @@ Usage: ./install.sh [OPTIONS]
 Options:
   --with-agent-web          Install the optional browser automation component
   --force-agent-web-update  Install/update the optional Agent Web component
+  --skip-agent-web          Do not update an existing Agent Web installation
   --skip-service            Install files without enabling the user service
   --session-only            Do not enable lingering; service stops after logout
   --force-tls               Replace the locally generated HTTPS certificate
@@ -47,8 +49,8 @@ while [[ $# -gt 0 ]]; do
             skip_agent_web=0
             ;;
         --skip-agent-web)
-            # Backward-compatible alias; Agent Web is already opt-in.
             skip_agent_web=1
+            agent_web_explicitly_skipped=1
             ;;
         --skip-service)
             skip_service=1
@@ -71,6 +73,13 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# Keep an already-installed Agent Web compatible during normal Agent-OS
+# updates, while leaving first-time installation optional.
+if [[ $skip_agent_web -eq 1 && $agent_web_explicitly_skipped -eq 0 ]] && \
+    command -v agent-webctl >/dev/null 2>&1; then
+    skip_agent_web=0
+fi
 
 if [[ $EUID -eq 0 ]]; then
     echo "Run the Agent-OS installer as your normal login user, not root." >&2

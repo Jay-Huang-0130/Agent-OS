@@ -160,13 +160,19 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
     try { await onSave(draft); setNotice("設定已儲存"); } catch (error) { setNotice(messageFor(error)); } finally { setBusy(false); }
   };
   const connect = async () => {
+    const authWindow = window.open("about:blank", "_blank");
+    if (authWindow) authWindow.opener = null;
     setProviderBusy(true); setProviderError("");
     try {
       const next = await client.startOpenAIOAuth();
       setCallbackUrl(""); setLogin(next);
       onProvider({ available: true, state: "connecting", authMode: null });
-      window.open(next.type === "browser" ? next.authUrl : next.verificationUrl, "_blank", "noopener,noreferrer");
-    } catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+      const destination = next.type === "browser"
+        ? (next.openedOnAgentWeb && next.humanUrl ? next.humanUrl : next.authUrl)
+        : next.verificationUrl;
+      if (authWindow) authWindow.location.replace(destination);
+      else window.open(destination, "_blank", "noopener,noreferrer");
+    } catch (error) { authWindow?.close(); setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
   };
   const completeBrowserLogin = async () => {
     if (login?.type !== "browser" || !callbackUrl.trim()) return;
@@ -175,14 +181,19 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
     catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
   };
   const useDeviceLogin = async () => {
+    const authWindow = window.open("about:blank", "_blank");
+    if (authWindow) authWindow.opener = null;
     setProviderBusy(true); setProviderError("");
     try {
       if (login) await client.cancelOpenAIOAuth(login.loginId);
       const next = await client.startOpenAIOAuth("device");
       setCallbackUrl(""); setLogin(next);
       onProvider({ available: true, state: "connecting", authMode: null });
-      if (next.type === "device") window.open(next.verificationUrl, "_blank", "noopener,noreferrer");
-    } catch (error) { setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
+      if (next.type === "device") {
+        if (authWindow) authWindow.location.replace(next.verificationUrl);
+        else window.open(next.verificationUrl, "_blank", "noopener,noreferrer");
+      }
+    } catch (error) { authWindow?.close(); setProviderError(messageFor(error)); } finally { setProviderBusy(false); }
   };
   const cancelLogin = async () => {
     if (!login) return;
@@ -207,7 +218,7 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
     </section>
     <form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form>
     <section className="settings-management"><button onClick={() => onNavigate("system")}><span><Icon name="activity" /></span><div><strong>系統狀態</strong><small>資源、服務與裝置健康度</small></div><Icon name="chevron" /></button><button onClick={() => onNavigate("activity")}><span><Icon name="update" /></span><div><strong>活動紀錄</strong><small>登入、安全與設定變更</small></div><Icon name="chevron" /></button></section>
-    {login && <div className="oauth-layer" role="presentation"><section className="oauth-dialog" role="dialog" aria-modal="true" aria-labelledby="oauth-title"><span className="oauth-mark"><Icon name="model" size={25} /></span>{login.type === "browser" ? <><p className="eyebrow">Browser OAuth</p><h2 id="oauth-title">使用 ChatGPT 登入</h2><p>在 OpenAI 頁面完成授權；localhost callback 抵達後會自動登入，不需要輸入代碼。</p><a className="primary oauth-open" href={login.authUrl} target="_blank" rel="noreferrer">開啟 OpenAI 授權頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 完成登入…</div><details className="oauth-help"><summary>登入沒有自動完成？</summary><div className="oauth-callback"><strong>遠端瀏覽器停在 localhost</strong><p>只有這種情況才需要從網址列複製完整 callback URL，交回樹莓派完成登入。</p><input type="url" value={callbackUrl} onChange={(event) => setCallbackUrl(event.target.value)} placeholder="http://localhost:…/auth/callback?code=…" autoComplete="off" spellCheck={false} /><button className="secondary" disabled={providerBusy || !callbackUrl.trim()} onClick={() => void completeBrowserLogin()}>{providerBusy ? "處理中…" : "完成這次登入"}</button></div><button className="oauth-fallback" disabled={providerBusy} onClick={() => void useDeviceLogin()}>改用裝置代碼</button></details></> : <><p className="eyebrow">Device authorization</p><h2 id="oauth-title">完成 OpenAI 登入</h2><p>在 OpenAI 頁面登入後輸入這組一次性代碼。完成後本頁會自動更新。</p><button className="oauth-code" onClick={() => void navigator.clipboard?.writeText(login.userCode)}><strong>{login.userCode}</strong><small>點一下複製</small></button><a className="primary oauth-open" href={login.verificationUrl} target="_blank" rel="noreferrer">開啟 OpenAI 登入頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 確認…</div></>}{providerError && <div className="oauth-error"><Icon name="warning" size={15} />{providerError}</div>}<button className="oauth-cancel" disabled={providerBusy} onClick={() => void cancelLogin()}>取消登入</button></section></div>}
+    {login && <div className="oauth-layer" role="presentation"><section className="oauth-dialog" role="dialog" aria-modal="true" aria-labelledby="oauth-title"><span className="oauth-mark"><Icon name="model" size={25} /></span>{login.type === "browser" ? <><p className="eyebrow">Browser OAuth</p><h2 id="oauth-title">使用 ChatGPT 登入</h2>{login.openedOnAgentWeb && login.humanUrl ? <><p>授權頁已在樹莓派的 Agent Web Chromium 開啟。完成授權後，localhost callback 會直接回到 Agent‑OS。</p><a className="primary oauth-open" href={login.humanUrl} target="_blank" rel="noreferrer">開啟 Agent Web 授權畫面<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待自動完成登入…</div></> : <><p>目前的 Agent Web 尚未支援自動開啟授權頁，先在此瀏覽器完成授權。</p><a className="primary oauth-open" href={login.authUrl} target="_blank" rel="noreferrer">開啟 OpenAI 授權頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 完成登入…</div><details className="oauth-help"><summary>登入沒有自動完成？</summary><div className="oauth-callback"><strong>遠端瀏覽器停在 localhost</strong><p>更新 Agent Web 後即可讓 callback 全自動完成；目前也可以貼回完整 callback URL。</p><input type="url" value={callbackUrl} onChange={(event) => setCallbackUrl(event.target.value)} placeholder="http://localhost:…/auth/callback?code=…" autoComplete="off" spellCheck={false} /><button className="secondary" disabled={providerBusy || !callbackUrl.trim()} onClick={() => void completeBrowserLogin()}>{providerBusy ? "處理中…" : "完成這次登入"}</button></div><button className="oauth-fallback" disabled={providerBusy} onClick={() => void useDeviceLogin()}>改用裝置代碼</button></details></>}</> : <><p className="eyebrow">Device authorization</p><h2 id="oauth-title">完成 OpenAI 登入</h2><p>在 OpenAI 頁面登入後輸入這組一次性代碼。完成後本頁會自動更新。</p><button className="oauth-code" onClick={() => void navigator.clipboard?.writeText(login.userCode)}><strong>{login.userCode}</strong><small>點一下複製</small></button><a className="primary oauth-open" href={login.verificationUrl} target="_blank" rel="noreferrer">開啟 OpenAI 登入頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 確認…</div></>}{providerError && <div className="oauth-error"><Icon name="warning" size={15} />{providerError}</div>}<button className="oauth-cancel" disabled={providerBusy} onClick={() => void cancelLogin()}>取消登入</button></section></div>}
   </div>;
 }
 
