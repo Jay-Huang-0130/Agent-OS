@@ -5,9 +5,11 @@ import type {
   ApprovalRecord,
   AgentEvent,
   BootstrapResponse,
+  CapabilityRecord,
   ConnectionState,
   CommitmentOwner,
   CommitmentRecord,
+  AutomationRecord,
   CreateGoalInput,
   GoalRecord,
   MetaResponse,
@@ -95,6 +97,21 @@ export class AgentClient {
 
   assistantRequests(limit = 50): Promise<AssistantRequestRecord[]> {
     return this.request<AssistantRequestRecord[]>(`/api/v1/assistant/requests?limit=${limit}`);
+  }
+
+  capabilities(): Promise<CapabilityRecord[]> {
+    return this.request<CapabilityRecord[]>("/api/v1/capabilities");
+  }
+
+  automations(): Promise<AutomationRecord[]> {
+    return this.request<AutomationRecord[]>("/api/v1/automations");
+  }
+
+  cancelAutomation(id: string): Promise<AutomationRecord> {
+    return this.request<AutomationRecord>(`/api/v1/automations/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }, true);
   }
 
   portfolio(): Promise<PortfolioSnapshot> {

@@ -108,6 +108,39 @@ export interface AssistantIntakeReceipt {
   assistantMessage: string;
 }
 
+export interface CapabilityRecord {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  version: number;
+  description: string;
+  runtime: "PYTHON_JSON";
+  sourceSha256: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  permissions: string[];
+  risk: "LOW" | "MEDIUM" | "HIGH";
+  timeoutMs: number;
+  status: "VALIDATED" | "DISABLED";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutomationRecord {
+  id: string;
+  goalId: string;
+  capabilityId: string | null;
+  executionMode: "DETERMINISTIC_AUTOMATION" | "AI_EXECUTION";
+  input: unknown;
+  schedule: { kind: "ONCE"; at: string } | { kind: "INTERVAL"; startAt: string; everySeconds: number };
+  timezone: string;
+  notificationTemplate: string | null;
+  misfirePolicy: "RUN_ONCE_NOW" | "RUN_LATEST_ONLY" | "RUN_ALL" | "SKIP_AND_RESUME" | "REPLAN";
+  status: "ACTIVE" | "PAUSED" | "CANCELLED";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type GoalStatus = "INBOX" | "CLARIFYING" | "PLANNING" | "ACTIVE" | "WAITING"
   | "WAITING_AUTH" | "NEEDS_APPROVAL" | "RETRYING" | "BLOCKED" | "COMPLETED" | "CANCELLED";
 export type AutonomyLevel = "OBSERVE" | "PREPARE" | "ASK_BEFORE_ACT" | "ACT_WITHIN_POLICY" | "FULLY_AUTOMATED";
@@ -243,6 +276,8 @@ export type AgentEvent =
   | { type: "system.status"; data: SystemStatus }
   | { type: "provider.openai.updated"; data: OpenAIConnection }
   | { type: "assistant.request.received"; data: AssistantRequestRecord }
+  | { type: "capability.validated"; data: CapabilityRecord }
+  | { type: "automation.created" | "automation.cancelled"; data: AutomationRecord }
   | { type: "project.created"; data: ProjectRecord }
   | { type: "goal.accepted" | "goal.paused" | "goal.resumed" | "goal.cancelled" | "goal.progressed" | "goal.blocked" | "goal.completed"; data: GoalRecord }
   | { type: "commitment.created" | "commitment.fulfilled" | "commitment.cancelled"; data: CommitmentRecord }

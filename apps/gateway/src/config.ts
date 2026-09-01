@@ -9,6 +9,7 @@ export interface GatewayConfig {
   pairingCodePath: string;
   codexHome: string;
   codexEntrypoint: string;
+  pythonExecutable: string;
   webDistPath: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -43,6 +44,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     codexEntrypoint: process.env.AGENT_OS_CODEX_ENTRYPOINT
       ? resolve(process.env.AGENT_OS_CODEX_ENTRYPOINT)
       : resolve(process.cwd(), "node_modules", "@openai", "codex", "bin", "codex.js"),
+    pythonExecutable: process.env.AGENT_OS_PYTHON ?? (process.platform === "win32" ? "python" : "python3"),
     webDistPath: process.env.AGENT_OS_WEB_DIST
       ? resolve(process.env.AGENT_OS_WEB_DIST)
       : resolve(process.cwd(), "apps", "web", "dist"),

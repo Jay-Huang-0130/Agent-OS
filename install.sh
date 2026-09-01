@@ -91,7 +91,7 @@ fi
     exit 69
 }
 
-for required_command in bash curl install openssl sha256sum tar; do
+for required_command in bash curl install openssl python3 sha256sum tar; do
     command -v "$required_command" >/dev/null 2>&1 || {
         echo "Missing required command: $required_command" >&2
         echo "Install the operating-system package that provides it, then retry." >&2

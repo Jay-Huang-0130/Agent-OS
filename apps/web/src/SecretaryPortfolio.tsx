@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AgentClient, ApiError } from "./api/agentClient";
 import type {
+  AutomationRecord,
   AutonomyLevel,
+  CapabilityRecord,
   CommitmentOwner,
   GoalRecord,
   GoalStatus,
@@ -266,11 +268,15 @@ export function SecretaryOverview({
 export function ResponsibilitiesPage({
   goals,
   projects,
+  automations,
+  capabilities,
   client,
   onChanged,
 }: {
   goals: GoalRecord[];
   projects: ProjectRecord[];
+  automations: AutomationRecord[];
+  capabilities: CapabilityRecord[];
   client: AgentClient;
   onChanged: () => Promise<void>;
 }) {
@@ -281,5 +287,10 @@ export function ResponsibilitiesPage({
     || (filter === "DONE" ? ["COMPLETED", "CANCELLED"].includes(goal.status)
       : filter === "WAITING" ? ["CLARIFYING", "WAITING", "WAITING_AUTH", "NEEDS_APPROVAL", "BLOCKED"].includes(goal.status)
         : !["COMPLETED", "CANCELLED", "CLARIFYING", "WAITING", "WAITING_AUTH", "NEEDS_APPROVAL", "BLOCKED"].includes(goal.status))), [goals, filter]);
-  return <div className="responsibilities-page"><header><div><p className="eyebrow">Responsibilities</p><h1>Projects 與 Goals</h1><p>所有內容都直接來自 SQLite Responsibility Kernel。</p></div><div><button className="secondary" onClick={() => setCreateMode("project")}>建立 Project</button><button className="primary" onClick={() => setCreateMode("goal")}>交辦 Goal</button></div></header><div className="responsibility-filters">{(["OPEN", "WAITING", "DONE", "ALL"] as const).map((value) => <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "OPEN" ? "進行中" : value === "WAITING" ? "等待／受阻" : value === "DONE" ? "已結束" : "全部"}<span>{value === "ALL" ? goals.length : undefined}</span></button>)}</div>{visible.length ? <div className="responsibility-list">{visible.map((goal) => <GoalCard key={goal.id} goal={goal} onOpen={(item) => { if (item.projectId) setProjectId(item.projectId); }} />)}</div> : <EmptySection text="這個分類目前沒有 Goal" />}{createMode && <CreateDialog mode={createMode} projects={projects} client={client} onClose={() => setCreateMode(undefined)} onCreated={onChanged} />}{projectId && <ProjectDrawer projectId={projectId} client={client} onClose={() => setProjectId(undefined)} onChanged={onChanged} />}</div>;
+  const capabilityNames = new Map(capabilities.map((item) => [item.id, `${item.name} v${item.version}`]));
+  const cancelAutomation = async (id: string) => {
+    if (!window.confirm("只取消這個排程？原本的 Goal 會繼續保持有效。")) return;
+    try { await client.cancelAutomation(id); await onChanged(); } catch (cause) { window.alert(errorMessage(cause)); }
+  };
+  return <div className="responsibilities-page"><header><div><p className="eyebrow">Responsibilities</p><h1>Projects 與 Goals</h1><p>所有內容都直接來自 SQLite Responsibility Kernel。</p></div><div><button className="secondary" onClick={() => setCreateMode("project")}>建立 Project</button><button className="primary" onClick={() => setCreateMode("goal")}>進階建立 Goal</button></div></header><section className="automation-panel"><header><div><p className="eyebrow">Phase 5 Wake Engine</p><h2>AI 選擇的執行方式</h2><p>這裡只顯示 Router 分析後建立的排程；系統沒有預設領域模板。</p></div><span>{automations.filter((item) => item.status === "ACTIVE").length} active</span></header>{automations.length ? <div className="automation-list">{automations.map((automation) => { const goal = goals.find((item) => item.id === automation.goalId); return <article key={automation.id}><span className={`automation-mode ${automation.executionMode === "AI_EXECUTION" ? "ai" : "code"}`}><Icon name={automation.executionMode === "AI_EXECUTION" ? "model" : "activity"} /></span><div><div><strong>{goal?.title ?? "Goal"}</strong><small>{automation.status}</small></div><p>{automation.executionMode === "AI_EXECUTION" ? "複雜任務：到期時交給 AI Runtime 分析" : `簡易任務：${automation.capabilityId ? capabilityNames.get(automation.capabilityId) ?? "Generated Capability" : "Generated Capability"}`}</p><small>{automation.schedule.kind === "ONCE" ? `單次・${formatDate(automation.schedule.at)}` : `每 ${Math.round(automation.schedule.everySeconds / 60)} 分鐘・${automation.misfirePolicy}`}・{automation.timezone}</small></div>{automation.status === "ACTIVE" && <button className="secondary" onClick={() => void cancelAutomation(automation.id)}>取消排程</button>}</article>; })}</div> : <EmptySection text="尚無排程；AI Router 判定適合時才會建立" />}</section><div className="responsibility-filters">{(["OPEN", "WAITING", "DONE", "ALL"] as const).map((value) => <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "OPEN" ? "進行中" : value === "WAITING" ? "等待／受阻" : value === "DONE" ? "已結束" : "全部"}<span>{value === "ALL" ? goals.length : undefined}</span></button>)}</div>{visible.length ? <div className="responsibility-list">{visible.map((goal) => <GoalCard key={goal.id} goal={goal} onOpen={(item) => { if (item.projectId) setProjectId(item.projectId); }} />)}</div> : <EmptySection text="這個分類目前沒有 Goal" />}{createMode && <CreateDialog mode={createMode} projects={projects} client={client} onClose={() => setCreateMode(undefined)} onCreated={onChanged} />}{projectId && <ProjectDrawer projectId={projectId} client={client} onClose={() => setProjectId(undefined)} onChanged={onChanged} />}</div>;
 }

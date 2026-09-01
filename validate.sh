@@ -69,7 +69,12 @@ grep -q '/api/v1/events' apps/gateway/src/app.ts
 grep -q '/api/v1/goals' apps/gateway/src/app.ts
 grep -q '/api/v1/portfolio' apps/gateway/src/app.ts
 grep -q '/api/v1/commitments' apps/gateway/src/app.ts
+grep -q '/api/v1/capabilities' apps/gateway/src/app.ts
+grep -q '/api/v1/automations' apps/gateway/src/app.ts
 grep -q 'CREATE TABLE IF NOT EXISTS outbox' apps/gateway/src/database.ts
+grep -q 'CREATE TABLE IF NOT EXISTS wake_occurrences' apps/gateway/src/database.ts
+grep -q 'CREATE TABLE IF NOT EXISTS usage_ledger' apps/gateway/src/database.ts
+grep -q 'python3' install.sh
 
 if grep -R -n -E --include='*.sh' --exclude-dir=node_modules --exclude-dir=.git -- '--password[ =][^f]' .; then
     echo "A plaintext password command-line option may have been introduced." >&2
@@ -80,4 +85,4 @@ if command -v npm >/dev/null 2>&1 && [[ -d node_modules ]]; then
     npm run typecheck
 fi
 
-echo "Agent-OS Phase 0-4 validation passed."
+echo "Agent-OS Phase 0-5 validation passed."

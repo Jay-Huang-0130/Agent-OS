@@ -34,6 +34,12 @@ doctor() {
         echo "[FAIL] Managed Node.js runtime is missing."
         failed=1
     fi
+    if command -v python3 >/dev/null 2>&1; then
+        echo "[PASS] Python Capability runtime: $(python3 --version 2>&1)"
+    else
+        echo "[FAIL] Python 3 Capability runtime is missing."
+        failed=1
+    fi
     if systemctl --user is-active --quiet agent-os.service; then
         echo "[PASS] Agent-OS service is active."
     else

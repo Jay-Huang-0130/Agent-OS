@@ -29,6 +29,18 @@ import {
   KernelError,
   ResponsibilityKernel,
 } from "./responsibilityKernel.js";
+import {
+  AutomationService,
+  CapabilityService,
+  executionModes,
+  misfirePolicies,
+  Phase5Error,
+  PythonJsonExecutor,
+  WakeEngine,
+  type AiWakeExecutor,
+  type CapabilityExecutor,
+  type WakeEngineOptions,
+} from "./wakeEngine.js";
 
 const settingsSchema = z.object({
   deviceName: z.string().trim().min(1).max(64),
@@ -49,6 +61,36 @@ const assistantRequestSchema = z.object({
 }).strict();
 const assistantRequestQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
+}).strict();
+const createCapabilitySchema = z.object({
+  name: z.string().trim().min(1).max(160).regex(/^[a-z0-9][a-z0-9._-]*$/iu),
+  version: z.number().int().min(1).max(1_000_000),
+  description: z.string().trim().max(4_000).optional(),
+  sourceCode: z.string().min(1).max(64_000),
+  inputSchema: z.record(z.unknown()),
+  outputSchema: z.record(z.unknown()),
+  permissions: z.array(z.string().min(1).max(300)).max(50),
+  risk: z.enum(["LOW", "MEDIUM", "HIGH"]),
+  timeoutMs: z.number().int().min(100).max(60_000),
+  testInput: z.unknown(),
+}).strict();
+const automationScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("ONCE"), at: z.string().datetime({ offset: true }) }).strict(),
+  z.object({
+    kind: z.literal("INTERVAL"),
+    startAt: z.string().datetime({ offset: true }),
+    everySeconds: z.number().int().min(60).max(366 * 24 * 60 * 60),
+  }).strict(),
+]);
+const createAutomationSchema = z.object({
+  goalId: z.string().uuid(),
+  capabilityId: z.string().uuid().optional(),
+  executionMode: z.enum(executionModes),
+  input: z.unknown(),
+  schedule: automationScheduleSchema,
+  timezone: z.string().trim().min(1).max(100),
+  notificationTemplate: z.string().max(8_000).optional(),
+  misfirePolicy: z.enum(misfirePolicies),
 }).strict();
 const cancelProviderLoginSchema = z.object({ loginId: z.string().uuid() }).strict();
 const createProjectSchema = z.object({
@@ -130,6 +172,10 @@ export interface BuildAppOptions {
   logger?: boolean;
   openAIAuth?: OpenAIAuthService;
   requestRouter?: RequestRouter;
+  capabilityExecutor?: CapabilityExecutor;
+  aiWakeExecutor?: AiWakeExecutor;
+  wakeEngine?: Omit<WakeEngineOptions, "notify" | "aiExecutor">;
+  startWakeEngine?: boolean;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -139,6 +185,12 @@ function apiError(reply: FastifyReply, status: number, code: string, message: st
 function kernelApiError(reply: FastifyReply, error: unknown) {
   if (!(error instanceof KernelError)) throw error;
   const status = error.code === "not_found" ? 404 : error.code === "completion_evidence_required" ? 422 : 409;
+  return apiError(reply, status, error.code, error.message);
+}
+
+function phase5ApiError(reply: FastifyReply, error: unknown) {
+  if (!(error instanceof Phase5Error)) throw error;
+  const status = error.code === "not_found" ? 404 : error.code === "approval_required" ? 403 : 422;
   return apiError(reply, status, error.code, error.message);
 }
 
@@ -236,6 +288,9 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const assistantIntake = options.requestRouter
     ? new AssistantIntakeService(database, options.requestRouter)
     : new AssistantIntakeService(database);
+  const capabilityExecutor = options.capabilityExecutor ?? new PythonJsonExecutor(config.pythonExecutable);
+  const capabilityService = new CapabilityService(database, capabilityExecutor);
+  const automationService = new AutomationService(database, capabilityService);
   const sockets = new Set<EventSocket>();
   const loginAttempts = new Map<string, LoginAttempt>();
   const pairingCode = database.hasOwner() ? undefined : ensurePairingCode(config.pairingCodePath);
@@ -250,6 +305,12 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       }
     }
   };
+  const wakeEngine = new WakeEngine(database, capabilityService, capabilityExecutor, {
+    ...options.wakeEngine,
+    ...(options.aiWakeExecutor ? { aiExecutor: options.aiWakeExecutor } : {}),
+    notify: (item) => broadcast({ type: "notification.created", data: item }),
+  });
+  if (options.startWakeEngine !== false) wakeEngine.start();
   const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
   const stopOpenAIUpdates = openAIAuth.onUpdate((status) => {
     broadcast({ type: "provider.openai.updated", data: status });
@@ -423,6 +484,60 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     const parsed = assistantRequestQuerySchema.safeParse(request.query);
     if (!parsed.success) return apiError(reply, 400, "invalid_assistant_request_filter", "The request limit is invalid.");
     return assistantIntake.list(session.userId, parsed.data.limit);
+  });
+
+  app.post("/api/v1/capabilities", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = createCapabilitySchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_capability", "Generated Capability manifest is invalid.");
+    try {
+      const capability = await capabilityService.register(session.userId, parsed.data);
+      broadcast({ type: "capability.validated", data: capability });
+      return reply.code(201).send(capability);
+    } catch (error) {
+      return phase5ApiError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/capabilities", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return capabilityService.list(session.userId);
+  });
+
+  app.post("/api/v1/automations", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = createAutomationSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_automation", "Automation execution or schedule manifest is invalid.");
+    try {
+      const key = idempotencyKey(request, reply);
+      if (key === "") return;
+      const automation = automationService.create(session.userId, parsed.data, key);
+      broadcast({ type: "automation.created", data: automation });
+      return reply.code(201).send(automation);
+    } catch (error) {
+      return phase5ApiError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/automations", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return automationService.list(session.userId);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/automations/:id/cancel", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    try {
+      const automation = automationService.cancel(request.params.id, session.userId);
+      broadcast({ type: "automation.cancelled", data: automation });
+      return automation;
+    } catch (error) {
+      return phase5ApiError(reply, error);
+    }
   });
 
   app.post("/api/v1/projects", async (request, reply) => {
@@ -807,6 +922,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
 
   app.addHook("onClose", async () => {
     clearInterval(heartbeat);
+    await wakeEngine.stop();
     for (const socket of sockets) socket.close(1001, "server shutdown");
     sockets.clear();
     stopOpenAIUpdates();

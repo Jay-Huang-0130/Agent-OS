@@ -52,7 +52,7 @@ Repo 已有、不要重做：
 - Browser Authentication Gate。
 - Project Memory、Experience、Skill 與受控自主進步。
 
-下一個實作階段是 Phase 4，不回頭重寫已完成的 Phase 0–3。
+下一個實作階段是 Phase 6，不回頭重寫已完成的 Phase 0–5。
 
 ---
 
@@ -188,7 +188,26 @@ Commitment 到期前產生正確提醒事件
 
 ## Phase 5：Wake Engine 與 0-Token Automation
 
+狀態：`COMPLETED`（詳見 [Phase 5 實作說明](PHASE-5.md)）
+
 目標：證明 Agent-OS 不需要每次排程都呼叫 AI。
+
+### AI-first 分流邊界
+
+Phase 5 不內建「天氣／公車／地圖」等領域排程。自然語言先由 Phase 6 Request Router 判斷：
+
+~~~text
+簡單、重複、輸入輸出可驗證
+→ AI 產生 LOW-risk Capability manifest + Python JSON runner
+→ 自我測試、Schema 與 Policy 驗證
+→ Durable Wake 排程，正常 occurrence 為 0 model calls
+
+複雜、低信心或每次都需要語意推理
+→ AI_EXECUTION Wake
+→ 到期時交給 Model Runtime，不強行產生程式
+~~~
+
+Router／Goal Compiler 屬於 Phase 6；Phase 5 提供其穩定的下游執行介面。
 
 ### Wake Engine
 
@@ -214,27 +233,32 @@ Commitment 到期前產生正確提醒事件
 
 ### 最小 Capability Framework
 
-- Capability definition 與 JSON Schema。
-- Registry、Runner、timeout、retry、risk、permissions。
-- HTTP read、template render、notification send。
+- 動態 Capability definition、版本、source hash 與 JSON Schema。
+- Registry、Python JSON runner、timeout、retry、risk、permissions。
+- HTTPS host allowlist、template render、notification send。
 - Schema validator 與 deterministic verifier。
+- Generated source self-test；Phase 5 只自動接受 LOW risk。
 
-### 第一條垂直案例：每日天氣
+### 通用垂直案例
 
 ~~~text
-建立 Goal 時選擇 Weather Capability
-→ 每日 09:00 Wake
-→ Weather API
+Router 判定為 DETERMINISTIC_AUTOMATION
+→ 產生 owner-specific Capability
+→ Policy + self-test
+→ INTERVAL Wake
+→ Python JSON execution
 → Schema Validation
 → Template
 → Notification
 → Next Wake
 ~~~
 
+天氣只是測試時可使用的一種輸入，不存在 production weather adapter 或固定 API。
+
 ### 完成標準
 
 ~~~text
-每日天氣正常 occurrence 為 0 model calls
+deterministic occurrence 為 0 model calls
 排程等待期間不佔 Worker
 Pi 關機跨過排程後依 RUN_LATEST_ONLY 正確恢復
 斷網時退避，不高頻重試
@@ -291,7 +315,7 @@ Router 必須輸出 execution mode、confidence、reason 和是否需要澄清�
 
 ~~~text
 自然語言可正確分成問答、固定自動化、Watcher、Agent 或長期 Goal
-已知天氣模板不呼叫強模型重新規劃
+已驗證的 generated Capability 不呼叫強模型重新規劃
 Worker 不能只用文字宣告完成，必須交 Result Envelope 和 Evidence
 Manager 不讀完整 Worker Transcript
 Model Run 結束後 Goal 狀態仍由 Kernel 持有

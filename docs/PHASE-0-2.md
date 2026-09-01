@@ -33,7 +33,7 @@ Node runtime 版本、下載 URL 與 SHA-256 都固定在 release 中，不會�
 ~/.local/bin/agent-osctl
 ```
 
-安裝器不會執行 `apt install nodejs`、`npm install -g`、`pip install`、nvm 或修改 shell profile。正式 release 應由 CI 預先建置；目前 source 安裝模式會在 staging 目錄使用 Agent-OS 自帶的 npm 建置，完成後移除 dev dependencies。
+安裝器不會執行 `apt install nodejs`、`npm install -g`、`pip install`、nvm 或修改 shell profile。Phase 5 Generated Capability runner 會檢查系統已有 `python3`，但不安裝任何 pip 套件。正式 release 應由 CI 預先建置；目前 source 安裝模式會在 staging 目錄使用 Agent-OS 自帶的 npm 建置，完成後移除 dev dependencies。
 
 為了登出 SSH 後仍持續運行，安裝器會確認 systemd user lingering 已啟用；若一般使用者權限不足，會透過 `sudo loginctl enable-linger` 要求一次管理員授權。這不會安裝全域套件。可用 `--session-only` 明確停用，但服務會隨使用者 session 結束。
 

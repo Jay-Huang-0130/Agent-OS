@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import type { OpenAIAuthService, OpenAIConnection } from "./codexAuth.js";
 import { loadConfig } from "./config.js";
+import type { CapabilityExecutor } from "./wakeEngine.js";
 
 const apps: FastifyInstance[] = [];
 
@@ -14,7 +15,7 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-async function fixture(openAIAuth?: OpenAIAuthService) {
+async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor) {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-gateway-"));
   const config = loadConfig({
     stateDir,
@@ -24,6 +25,8 @@ async function fixture(openAIAuth?: OpenAIAuthService) {
   });
   const app = await buildApp(config, {
     ...(openAIAuth ? { openAIAuth } : {}),
+    ...(capabilityExecutor ? { capabilityExecutor } : {}),
+    startWakeEngine: false,
   });
   apps.push(app);
   return { app, config };
@@ -442,4 +445,60 @@ test("unified assistant intake persists natural language without prematurely cre
   const goals = await app.inject({ method: "GET", url: "/api/v1/goals", headers: { cookie } });
   assert.equal(goals.statusCode, 200);
   assert.deepEqual(goals.json(), []);
+});
+
+test("Phase 5 API registers a generated Capability and schedules it without domain hardcoding", async () => {
+  const executor: CapabilityExecutor = { async execute(_capability, input) { return input; } };
+  const { app, config } = await fixture(undefined, executor);
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({
+    method: "POST", url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" },
+  });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const headers = { cookie, "x-csrf-token": session.json().csrfToken as string };
+  const goal = await app.inject({
+    method: "POST", url: "/api/v1/goals", headers: { ...headers, "idempotency-key": "phase5-goal" },
+    payload: { title: "Personal recurring request", desiredOutcome: "Run the selected method", completionCriteria: ["Occurrences are durable"] },
+  });
+  assert.equal(goal.statusCode, 201);
+
+  const capability = await app.inject({
+    method: "POST", url: "/api/v1/capabilities", headers,
+    payload: {
+      name: "generated.owner-specific-task", version: 1, description: "Created after Router classification",
+      sourceCode: "def main(payload):\n    return payload",
+      inputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } }, additionalProperties: false },
+      outputSchema: { type: "object", required: ["query"], properties: { query: { type: "string" } }, additionalProperties: false },
+      permissions: [], risk: "LOW", timeoutMs: 1_000, testInput: { query: "self-test" },
+    },
+  });
+  assert.equal(capability.statusCode, 201);
+  assert.equal(capability.json().status, "VALIDATED");
+  assert.equal(capability.json().sourceCode, undefined);
+
+  const automation = await app.inject({
+    method: "POST", url: "/api/v1/automations", headers,
+    payload: {
+      goalId: goal.json().id, capabilityId: capability.json().id, executionMode: "DETERMINISTIC_AUTOMATION",
+      input: { query: "owner request" },
+      schedule: { kind: "INTERVAL", startAt: "2026-09-02T01:00:00.000Z", everySeconds: 86_400 },
+      timezone: "Asia/Taipei", notificationTemplate: "{{query}}", misfirePolicy: "RUN_LATEST_ONLY",
+    },
+  });
+  assert.equal(automation.statusCode, 201);
+  assert.equal(automation.json().executionMode, "DETERMINISTIC_AUTOMATION");
+
+  const listed = await app.inject({ method: "GET", url: "/api/v1/automations", headers: { cookie } });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json().length, 1);
+  const cancelled = await app.inject({
+    method: "POST", url: `/api/v1/automations/${automation.json().id}/cancel`, headers,
+  });
+  assert.equal(cancelled.statusCode, 200);
+  assert.equal(cancelled.json().status, "CANCELLED");
+  const stillActive = await app.inject({ method: "GET", url: `/api/v1/goals/${goal.json().id}`, headers: { cookie } });
+  assert.equal(stillActive.json().status, "ACTIVE");
 });

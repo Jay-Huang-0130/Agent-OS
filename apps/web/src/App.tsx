@@ -3,7 +3,9 @@ import { AgentClient, ApiError } from "./api/agentClient";
 import type {
   ActivityItem,
   AssistantRequestRecord,
+  AutomationRecord,
   BootstrapResponse,
+  CapabilityRecord,
   ConnectionState,
   NotificationItem,
   OpenAIConnection,
@@ -519,6 +521,8 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [portfolio, setPortfolio] = useState<PortfolioSnapshot>();
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [goals, setGoals] = useState<GoalRecord[]>([]);
+  const [automations, setAutomations] = useState<AutomationRecord[]>([]);
+  const [capabilities, setCapabilities] = useState<CapabilityRecord[]>([]);
   const [settings, setSettings] = useState<Settings>();
   const [openAI, setOpenAI] = useState<OpenAIConnection>();
   const [error, setError] = useState("");
@@ -534,14 +538,18 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
 
   const refreshResponsibilities = async () => {
     try {
-      const [nextPortfolio, nextProjects, nextGoals] = await Promise.all([
+      const [nextPortfolio, nextProjects, nextGoals, nextAutomations, nextCapabilities] = await Promise.all([
         client.portfolio(),
         client.projects(),
         client.goals(),
+        client.automations(),
+        client.capabilities(),
       ]);
       setPortfolio(nextPortfolio);
       setProjects(nextProjects);
       setGoals(nextGoals);
+      setAutomations(nextAutomations);
+      setCapabilities(nextCapabilities);
       setError("");
     } catch (cause) {
       setError(messageFor(cause));
@@ -561,7 +569,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
         setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
         setToast(event.data);
       }
-      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected"].includes(event.type)) void refreshResponsibilities();
+      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected", "capability.validated", "automation.created", "automation.cancelled"].includes(event.type)) void refreshResponsibilities();
     }, setConnection);
     return stop;
   }, []);
@@ -601,7 +609,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
         {view === "records" && <div className="prototype-notice" role="note"><Icon name="warning" size={17} /><span><strong>Records UI 原型</strong>成果與對話仍是示範資料，會在後續 Runtime / Memory Phase 接入。</span></div>}
         {view === "overview" && <SecretaryOverview name={name} snapshot={portfolio} projects={projects} client={client} onChanged={refreshResponsibilities} onChat={() => setAssistantOpen(true)} />}
-        {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} client={client} onChanged={refreshResponsibilities} />}
+        {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} automations={automations} capabilities={capabilities} client={client} onChanged={refreshResponsibilities} />}
         {view === "records" && <RecordsPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}

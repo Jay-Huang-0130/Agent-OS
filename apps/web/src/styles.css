@@ -985,6 +985,21 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .responsibility-filters span { margin-left: 5px; }
 .responsibility-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
 .responsibility-list .secretary-goal-card { border: 1px solid var(--line); border-radius: 15px; background: var(--panel); }
+.automation-panel { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
+.automation-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+.automation-panel h2 { margin: 3px 0 5px; font-size: 19px; }
+.automation-panel header p:last-child { margin: 0; color: var(--muted); font-size: 11px; }
+.automation-panel > header > span { padding: 5px 8px; border-radius: 20px; color: var(--green); background: var(--green-soft); font-size: 9px; font-weight: 800; text-transform: uppercase; }
+.automation-list { display: grid; }
+.automation-list article { display: grid; grid-template-columns: 39px 1fr auto; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.automation-list article:last-child { border-bottom: 0; }
+.automation-list article > div > div { display: flex; align-items: center; gap: 8px; }
+.automation-list article strong { font-size: 13px; }
+.automation-list article small { color: var(--muted); font-size: 9px; }
+.automation-list article p { margin: 4px 0; color: var(--muted); font-size: 11px; }
+.automation-list article > button { padding: 7px 9px; font-size: 9px; }
+.automation-mode { width: 39px; height: 39px; display: grid; place-items: center; border-radius: 11px; color: var(--green); background: var(--green-soft); }
+.automation-mode.ai { color: #7563a8; background: #eeeafd; }
 .secretary-modal-layer { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 22px; background: #07130eb8; backdrop-filter: blur(6px); }
 .secretary-modal { width: min(100%, 590px); max-height: calc(100vh - 44px); display: grid; gap: 16px; padding: 24px; overflow-y: auto; border: 1px solid var(--line); border-radius: 20px; color: var(--ink); background: var(--panel); box-shadow: var(--shadow); }
 .secretary-modal > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
@@ -1050,4 +1065,6 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .secretary-drawer { padding: 20px; }
   .commitment-list article { grid-template-columns: auto 1fr; }
   .commitment-list article > b { grid-column: 2; }
+  .automation-list article { grid-template-columns: 39px 1fr; }
+  .automation-list article > button { grid-column: 2; justify-self: start; }
 }

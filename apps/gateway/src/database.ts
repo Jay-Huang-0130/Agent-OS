@@ -366,6 +366,115 @@ const migrations: Migration[] = [
       ON assistant_requests(status, created_at);
     `,
   },
+  {
+    version: 4,
+    name: "phase_5_wake_engine_and_generated_capabilities",
+    sql: `
+      CREATE TABLE IF NOT EXISTS capabilities (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        description TEXT NOT NULL DEFAULT '',
+        runtime TEXT NOT NULL CHECK (runtime IN ('PYTHON_JSON')),
+        source_code TEXT NOT NULL,
+        source_sha256 TEXT NOT NULL,
+        input_schema_json TEXT NOT NULL,
+        output_schema_json TEXT NOT NULL,
+        permissions_json TEXT NOT NULL DEFAULT '[]',
+        risk TEXT NOT NULL CHECK (risk IN ('LOW', 'MEDIUM', 'HIGH')),
+        timeout_ms INTEGER NOT NULL CHECK (timeout_ms BETWEEN 100 AND 60000),
+        status TEXT NOT NULL CHECK (status IN ('VALIDATED', 'DISABLED')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_user_id, name, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS automations (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        capability_id TEXT REFERENCES capabilities(id) ON DELETE RESTRICT,
+        execution_mode TEXT NOT NULL CHECK (execution_mode IN ('DETERMINISTIC_AUTOMATION', 'AI_EXECUTION')),
+        input_json TEXT NOT NULL DEFAULT '{}',
+        schedule_json TEXT NOT NULL,
+        timezone TEXT NOT NULL,
+        notification_template TEXT,
+        misfire_policy TEXT NOT NULL CHECK (misfire_policy IN (
+          'RUN_ONCE_NOW', 'RUN_LATEST_ONLY', 'RUN_ALL', 'SKIP_AND_RESUME', 'REPLAN'
+        )),
+        status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'PAUSED', 'CANCELLED')),
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(goal_id, idempotency_key),
+        CHECK (
+          (execution_mode = 'DETERMINISTIC_AUTOMATION' AND capability_id IS NOT NULL) OR
+          (execution_mode = 'AI_EXECUTION' AND capability_id IS NULL)
+        )
+      );
+
+      CREATE TABLE IF NOT EXISTS wake_occurrences (
+        id TEXT PRIMARY KEY,
+        wake_id TEXT NOT NULL REFERENCES wake_conditions(id) ON DELETE CASCADE,
+        automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+        occurrence_key TEXT NOT NULL UNIQUE,
+        scheduled_for TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'CLAIMED', 'RUNNING', 'RETRYING', 'COMPLETED', 'FAILED', 'SKIPPED', 'REPLAN_REQUIRED'
+        )),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        next_retry_at TEXT,
+        error_json TEXT,
+        output_json TEXT,
+        claimed_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS usage_ledger (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+        occurrence_id TEXT NOT NULL REFERENCES wake_occurrences(id) ON DELETE CASCADE,
+        capability_id TEXT REFERENCES capabilities(id) ON DELETE SET NULL,
+        model_calls INTEGER NOT NULL DEFAULT 0 CHECK (model_calls >= 0),
+        input_tokens INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+        output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+        tool_calls INTEGER NOT NULL DEFAULT 0 CHECK (tool_calls >= 0),
+        duration_ms INTEGER NOT NULL DEFAULT 0 CHECK (duration_ms >= 0),
+        success INTEGER NOT NULL CHECK (success IN (0, 1)),
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS notification_outbox (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        occurrence_id TEXT NOT NULL REFERENCES wake_occurrences(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'SENT', 'FAILED')),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        available_at TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        sent_at TEXT,
+        last_error TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS capabilities_owner_status_idx
+      ON capabilities(owner_user_id, status, name, version DESC);
+      CREATE INDEX IF NOT EXISTS automations_goal_status_idx
+      ON automations(goal_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS wake_occurrences_status_retry_idx
+      ON wake_occurrences(status, next_retry_at, scheduled_for);
+      CREATE INDEX IF NOT EXISTS usage_ledger_goal_created_idx
+      ON usage_ledger(goal_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS notification_outbox_pending_idx
+      ON notification_outbox(status, available_at, created_at);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {

@@ -195,7 +195,7 @@ export async function collectSystemStatus(version: string): Promise<SystemStatus
         id: "model",
         name: "Model runtime",
         state: "stopped",
-        detail: "OpenAI sign-in is available; task execution runtime is the next Phase 3 step.",
+        detail: "Wake Engine is available; the AI Router and model task runtime arrive in Phase 6.",
       },
     ],
   };
