@@ -15,6 +15,7 @@ import {
   setSessionCookie,
   verifyPassword,
 } from "./auth.js";
+import { AssistantIntakeError, AssistantIntakeService, type RequestRouter } from "./assistantIntake.js";
 import type { GatewayConfig } from "./config.js";
 import { publicDeviceName } from "./config.js";
 import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
@@ -43,6 +44,12 @@ const setupSchema = z.object({
 }).strict();
 
 const loginSchema = z.object({ password: z.string().min(1).max(256) }).strict();
+const assistantRequestSchema = z.object({
+  message: z.string().trim().min(1).max(32_000),
+}).strict();
+const assistantRequestQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+}).strict();
 const cancelProviderLoginSchema = z.object({ loginId: z.string().uuid() }).strict();
 const createProjectSchema = z.object({
   name: z.string().trim().min(1).max(160),
@@ -122,6 +129,7 @@ interface LoginAttempt {
 export interface BuildAppOptions {
   logger?: boolean;
   openAIAuth?: OpenAIAuthService;
+  requestRouter?: RequestRouter;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -225,6 +233,9 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   });
   const database = new AgentDatabase(config.databasePath);
   const kernel = new ResponsibilityKernel(database);
+  const assistantIntake = options.requestRouter
+    ? new AssistantIntakeService(database, options.requestRouter)
+    : new AssistantIntakeService(database);
   const sockets = new Set<EventSocket>();
   const loginAttempts = new Map<string, LoginAttempt>();
   const pairingCode = database.hasOwner() ? undefined : ensurePairingCode(config.pairingCodePath);
@@ -385,6 +396,33 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     addActivity("settings", "Settings updated", `${session.displayName} changed device settings.`);
     broadcast({ type: "settings.updated", data: parsed.data });
     return parsed.data;
+  });
+
+  app.post("/api/v1/assistant/requests", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = assistantRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return apiError(reply, 400, "invalid_assistant_request", "A message between 1 and 32,000 characters is required.");
+    }
+    try {
+      const receipt = await assistantIntake.accept(session.userId, parsed.data.message, key);
+      broadcast({ type: "assistant.request.received", data: receipt.request });
+      return reply.code(202).send(receipt);
+    } catch (error) {
+      if (error instanceof AssistantIntakeError) return apiError(reply, 409, error.code, error.message);
+      throw error;
+    }
+  });
+
+  app.get("/api/v1/assistant/requests", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const parsed = assistantRequestQuerySchema.safeParse(request.query);
+    if (!parsed.success) return apiError(reply, 400, "invalid_assistant_request_filter", "The request limit is invalid.");
+    return assistantIntake.list(session.userId, parsed.data.limit);
   });
 
   app.post("/api/v1/projects", async (request, reply) => {

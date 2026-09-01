@@ -28,6 +28,22 @@ export interface ActivityRecord {
   createdAt: string;
 }
 
+export type AssistantRequestStatus = "PENDING_ROUTING" | "ROUTED" | "NEEDS_CLARIFICATION" | "CANCELLED";
+
+export interface AssistantRequestRecord {
+  id: string;
+  ownerUserId: string;
+  message: string;
+  status: AssistantRequestStatus;
+  executionMode: string | null;
+  confidence: number | null;
+  routingReason: string | null;
+  requiresClarification: boolean | null;
+  goalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface Migration {
   version: number;
   name: string;
@@ -321,6 +337,35 @@ const migrations: Migration[] = [
       END;
     `,
   },
+  {
+    version: 3,
+    name: "phase_4_unified_assistant_intake",
+    sql: `
+      CREATE TABLE IF NOT EXISTS assistant_requests (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        message TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN (
+          'PENDING_ROUTING', 'ROUTED', 'NEEDS_CLARIFICATION', 'CANCELLED'
+        )),
+        execution_mode TEXT,
+        confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+        routing_reason TEXT,
+        requires_clarification INTEGER CHECK (requires_clarification IS NULL OR requires_clarification IN (0, 1)),
+        goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_user_id, idempotency_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS assistant_requests_owner_created_idx
+      ON assistant_requests(owner_user_id, created_at DESC);
+
+      CREATE INDEX IF NOT EXISTS assistant_requests_status_created_idx
+      ON assistant_requests(status, created_at);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {
@@ -518,7 +563,92 @@ export class AgentDatabase {
     }));
   }
 
+  createAssistantRequest(ownerUserId: string, message: string, idempotencyKey?: string): AssistantRequestRecord {
+    if (idempotencyKey) {
+      const existing = this.db.prepare(
+        "SELECT * FROM assistant_requests WHERE owner_user_id = ? AND idempotency_key = ?",
+      ).get(ownerUserId, idempotencyKey) as Record<string, unknown> | undefined;
+      if (existing) return assistantRequestFromRow(existing);
+    }
+    const now = new Date().toISOString();
+    const record: AssistantRequestRecord = {
+      id: randomUUID(),
+      ownerUserId,
+      message,
+      status: "PENDING_ROUTING",
+      executionMode: null,
+      confidence: null,
+      routingReason: null,
+      requiresClarification: null,
+      goalId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.db.prepare(`INSERT INTO assistant_requests
+      (id, owner_user_id, message, status, execution_mode, confidence, routing_reason,
+       requires_clarification, goal_id, idempotency_key, created_at, updated_at)
+      VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`)
+      .run(record.id, ownerUserId, message, record.status, idempotencyKey ?? null, now, now);
+    return record;
+  }
+
+  listAssistantRequests(ownerUserId: string, limit = 50): AssistantRequestRecord[] {
+    const safeLimit = Math.max(1, Math.min(200, limit));
+    const rows = this.db.prepare(
+      "SELECT * FROM assistant_requests WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ?",
+    ).all(ownerUserId, safeLimit) as Array<Record<string, unknown>>;
+    return rows.map(assistantRequestFromRow);
+  }
+
+  recordAssistantRouting(
+    id: string,
+    ownerUserId: string,
+    result: {
+      state: "ROUTED" | "NEEDS_CLARIFICATION";
+      executionMode: string;
+      confidence: number;
+      reason: string;
+      requiresClarification: boolean;
+    },
+  ): AssistantRequestRecord {
+    const now = new Date().toISOString();
+    const changed = this.db.prepare(`UPDATE assistant_requests SET
+      status = ?, execution_mode = ?, confidence = ?, routing_reason = ?,
+      requires_clarification = ?, updated_at = ?
+      WHERE id = ? AND owner_user_id = ? AND status = 'PENDING_ROUTING'`)
+      .run(
+        result.state,
+        result.executionMode,
+        result.confidence,
+        result.reason,
+        result.requiresClarification ? 1 : 0,
+        now,
+        id,
+        ownerUserId,
+      );
+    if (Number(changed.changes) !== 1) throw new Error("Assistant request is missing or has already been routed.");
+    const row = this.db.prepare("SELECT * FROM assistant_requests WHERE id = ? AND owner_user_id = ?")
+      .get(id, ownerUserId) as Record<string, unknown>;
+    return assistantRequestFromRow(row);
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+function assistantRequestFromRow(row: Record<string, unknown>): AssistantRequestRecord {
+  return {
+    id: asString(row.id),
+    ownerUserId: asString(row.owner_user_id),
+    message: asString(row.message),
+    status: asString(row.status) as AssistantRequestStatus,
+    executionMode: row.execution_mode === null ? null : asString(row.execution_mode),
+    confidence: row.confidence === null ? null : Number(row.confidence),
+    routingReason: row.routing_reason === null ? null : asString(row.routing_reason),
+    requiresClarification: row.requires_clarification === null ? null : Number(row.requires_clarification) === 1,
+    goalId: row.goal_id === null ? null : asString(row.goal_id),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
 }

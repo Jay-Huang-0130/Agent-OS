@@ -162,7 +162,8 @@ Recently Completed
 
 ### 功能
 
-- 明確的 `[聊天]`、`[交辦]` 模式。
+- 單一自然語言聊天入口；使用者不需要先選擇聊天、Goal 或長期任務。
+- Intake 與 Goal 分離：原始請求先 durable 保存，Phase 6 Router 才決定 execution mode。
 - Project 和 Goal 建立、查看、暫停、恢復、取消。
 - Priority、Deadline、Attention Policy。
 - Autonomy Contract：Observe、Prepare、Ask Before Act、Act Within Policy、Fully Automated。
@@ -170,7 +171,7 @@ Recently Completed
 - Project Detail：Goals、Commitments、Timeline、Artifacts、等待原因。
 - Goal accepted、progressed、waiting、blocked、completed 事件。
 
-此階段先用表單和 deterministic rules，不需要模型自動理解所有輸入。
+此階段建立正確的單一入口與 durable intake 邊界；Phase 6 接入 Router 前不會假裝已理解輸入，也不會把每則訊息直接建立成 Goal。Project／Goal 表單保留為進階管理入口。
 
 ### 完成標準
 

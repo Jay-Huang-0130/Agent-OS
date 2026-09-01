@@ -48,18 +48,31 @@ Recently Completed
 - 使用者可以明確批准或拒絕。
 - 批准後建立 `APPROVAL_GRANTED` Wake，讓後續 Worker 可以從原責任恢復。
 
-### 聊天與交辦邊界
+### 單一 Assistant Intake
 
-Web UI 明確區分：
+主要入口是一個自然語言聊天框，不要求使用者先選擇「聊天／交辦／Goal／長期任務」。資料流為：
 
-- `聊天`：Phase 6 模型 Runtime 尚未接入時，清楚顯示未啟用，不會假裝產生 AI 回答。
-- `交辦`：進入 deterministic Goal Contract 表單，只有資料驗證並成功持久化後才顯示於 Portfolio。
+```text
+Natural-language message
+→ durable assistant_requests intake
+→ Request Router（Phase 6）
+→ execution mode / clarification
+→ Goal Compiler（只有需要持續責任時）
+```
+
+- Intake 與 Goal 是不同 aggregate；保存訊息不等於接受 Goal。
+- Gateway 以 `202 Accepted` 回傳目前 routing 狀態。
+- Phase 6 Runtime 尚未接入時，請求保持 `PENDING_ROUTING`，不會用前端猜測分類，也不會假裝產生 AI 回答。
+- Project／Goal 表單保留為進階管理與測試 Kernel 的入口，不是一般使用者的主要流程。
 
 ## API
 
 Phase 4 新增：
 
 ```text
+POST   /api/v1/assistant/requests
+GET    /api/v1/assistant/requests
+
 GET    /api/v1/portfolio
 GET    /api/v1/projects/:id
 
@@ -90,7 +103,7 @@ Commitment 到期前產生正確提醒事件                  TIME Wake + remind
 取消 Goal 必須是明確操作並留下 Audit               confirmation + append-only goal.cancelled
 ```
 
-自動測試另外涵蓋 Project Detail、Approval decision、`APPROVAL_GRANTED` Wake、Commitment fulfill 後取消 reminder，以及 Web mutation 的 CSRF / idempotency headers。
+自動測試另外涵蓋 unified intake 不會提早建立 Goal、Project Detail、Approval decision、`APPROVAL_GRANTED` Wake、Commitment fulfill 後取消 reminder，以及 Web mutation 的 CSRF / idempotency headers。
 
 ## Phase 邊界
 

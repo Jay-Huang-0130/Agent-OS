@@ -400,3 +400,46 @@ test("Phase 4 API exposes commitments, portfolio projection and Project detail",
   assert.equal(fulfilled.statusCode, 200);
   assert.equal(fulfilled.json().status, "FULFILLED");
 });
+
+test("unified assistant intake persists natural language without prematurely creating a Goal", async () => {
+  const { app, config } = await fixture();
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" },
+  });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const writeHeaders = { cookie, "x-csrf-token": session.json().csrfToken as string, "idempotency-key": "assistant-1" };
+
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/v1/assistant/requests",
+    headers: writeHeaders,
+    payload: { message: "每天早上幫我整理天氣，另外現在台北會下雨嗎？" },
+  });
+  assert.equal(accepted.statusCode, 202);
+  assert.equal(accepted.json().request.status, "PENDING_ROUTING");
+  assert.equal(accepted.json().router.executionMode, null);
+  assert.equal(accepted.json().router.state, "PENDING_RUNTIME");
+
+  const replay = await app.inject({
+    method: "POST",
+    url: "/api/v1/assistant/requests",
+    headers: writeHeaders,
+    payload: { message: "每天早上幫我整理天氣，另外現在台北會下雨嗎？" },
+  });
+  assert.equal(replay.statusCode, 202);
+  assert.equal(replay.json().request.id, accepted.json().request.id);
+
+  const requests = await app.inject({ method: "GET", url: "/api/v1/assistant/requests", headers: { cookie } });
+  assert.equal(requests.statusCode, 200);
+  assert.equal(requests.json().length, 1);
+  assert.equal(requests.json()[0].message, "每天早上幫我整理天氣，另外現在台北會下雨嗎？");
+
+  const goals = await app.inject({ method: "GET", url: "/api/v1/goals", headers: { cookie } });
+  assert.equal(goals.statusCode, 200);
+  assert.deepEqual(goals.json(), []);
+});

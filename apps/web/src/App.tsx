@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AgentClient, ApiError } from "./api/agentClient";
 import type {
   ActivityItem,
+  AssistantRequestRecord,
   BootstrapResponse,
   ConnectionState,
   NotificationItem,
@@ -354,24 +355,42 @@ function TaskDrawer({ task, onClose }: { task: DemoTask; onClose: () => void }) 
   </div>;
 }
 
-function AssistantPanel({ onClose, onDelegate }: { onClose: () => void; onDelegate: () => void }) {
+function AssistantPanel({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState("");
-  const [accepted, setAccepted] = useState(false);
-  const [mode, setMode] = useState<"chat" | "delegate">("chat");
-  const submit = (event: FormEvent) => {
+  const [requests, setRequests] = useState<AssistantRequestRecord[]>([]);
+  const [assistantMessage, setAssistantMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void client.assistantRequests().then((items) => setRequests(items.reverse())).catch((cause) => setError(messageFor(cause)));
+  }, []);
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!message.trim()) return;
-    if (mode === "delegate") { onDelegate(); return; }
-    setAccepted(true);
+    const content = message.trim();
+    if (!content || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const receipt = await client.submitAssistantRequest(content);
+      setRequests((current) => [...current.filter((item) => item.id !== receipt.request.id), receipt.request]);
+      setAssistantMessage(receipt.assistantMessage);
+      setMessage("");
+    } catch (cause) {
+      setError(messageFor(cause));
+    } finally {
+      setBusy(false);
+    }
   };
   return <div className="assistant-layer" role="presentation" onMouseDown={onClose}>
     <section className="assistant-panel" role="dialog" aria-modal="true" aria-labelledby="assistant-title" onMouseDown={(event) => event.stopPropagation()}>
-      <header className="assistant-head"><div className="assistant-identity"><span><Icon name="sparkle" /></span><div><strong id="assistant-title">Agent-OS</strong><small><i />隨時可以交付工作</small></div></div><button className="icon-only" onClick={onClose} aria-label="關閉助手"><Icon name="close" /></button></header>
+      <header className="assistant-head"><div className="assistant-identity"><span><Icon name="sparkle" /></span><div><strong id="assistant-title">Agent-OS</strong><small><i />單一自然語言入口</small></div></div><button className="icon-only" onClick={onClose} aria-label="關閉助手"><Icon name="close" /></button></header>
       <div className="assistant-body">
-        <div className="assistant-mode-switch"><button className={mode === "chat" ? "active" : ""} onClick={() => { setMode("chat"); setAccepted(false); }}><Icon name="model" size={16} />聊天</button><button className={mode === "delegate" ? "active" : ""} onClick={() => { setMode("delegate"); setAccepted(false); }}><Icon name="sparkle" size={16} />交辦</button></div>
-        {!accepted ? <><div className="assistant-welcome"><p>{mode === "chat" ? "聊天模式" : "交辦模式"}</p><span>{mode === "chat" ? "模型對話會在 Phase 6 接入；目前不會假裝產生 AI 回答。" : "送出後會開啟 deterministic Goal 表單，由你明確設定 Outcome 與完成條件。"}</span></div>{mode === "delegate" && <div className="prompt-chips"><button type="button" onClick={() => setMessage("建立一個新的長期責任")}>建立長期 Goal</button><button type="button" onClick={() => setMessage("安排一件有截止時間的工作")}>設定截止工作</button></div>}</> : <div className="accepted-task"><div className="accepted-icon"><Icon name="model" /></div><div><p className="eyebrow">Chat runtime</p><h3>模型對話尚未啟用</h3><p>Phase 4 只接受結構化交辦，不會把文字假裝成已執行的 Agent 工作。請切換到「交辦」建立 Goal。</p><div><button onClick={() => { setMode("delegate"); setAccepted(false); }}>切換到交辦<Icon name="chevron" size={15} /></button></div></div></div>}
+        {!requests.length && !assistantMessage && <div className="assistant-welcome"><p>直接告訴我你需要什麼</p><span>你不需要先判斷這是聊天、一次性工作、自動化或長期 Goal；Request Router 會負責分類。</span></div>}
+        {!!requests.length && <div className="assistant-request-history">{requests.map((item) => <article key={item.id}><p>{item.message}</p><small><i />{item.status === "PENDING_ROUTING" ? "等待 Request Router 分析" : item.status}</small></article>)}</div>}
+        {assistantMessage && <div className="accepted-task"><div className="accepted-icon"><Icon name="model" /></div><div><p className="eyebrow">Intake saved</p><h3>訊息已安全保存</h3><p>{assistantMessage}</p></div></div>}
+        {error && <div className="error-box"><Icon name="warning" />{error}</div>}
       </div>
-      <form className="assistant-compose" onSubmit={submit}><textarea value={message} onChange={(event) => { setMessage(event.target.value); setAccepted(false); }} placeholder={mode === "chat" ? "聊天模式尚未接入模型…" : "描述你想交辦的責任…"} rows={2} autoFocus /><div><span><Icon name="shield" size={15} />{mode === "chat" ? "不會建立 Goal" : "會先開啟 Goal Contract 表單"}</span><button className="send-button" disabled={!message.trim()}><Icon name="arrow" /></button></div></form>
+      <form className="assistant-compose" onSubmit={(event) => void submit(event)}><textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="問一個問題，或描述你想完成的事…" rows={2} autoFocus /><div><span><Icon name="shield" size={15} />先保存原始意圖，再由系統判斷處理方式</span><button className="send-button" disabled={busy || !message.trim()} aria-label="送出訊息">{busy ? <span className="loader" /> : <Icon name="arrow" />}</button></div></form>
     </section>
   </div>;
 }
@@ -590,7 +609,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       </main>
       <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>
     </div>
-    {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} onDelegate={() => { setAssistantOpen(false); setView("tasks"); }} />}
+    {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} />}
     {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(undefined)} />}
     {notificationOpen && <NotificationCenter items={notifications} onClose={() => setNotificationOpen(false)} onRead={(id) => setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item))} onReadAll={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} onOpenTask={(task) => { setNotificationOpen(false); setSelectedTask(task); }} />}
     {toast && <NotificationToast item={toast} onClose={() => setToast(undefined)} onOpen={() => { const task = demoTasks.find((item) => item.id === toast.taskId); if (task) setSelectedTask(task); setToast(undefined); }} />}

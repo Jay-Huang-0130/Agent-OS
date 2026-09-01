@@ -81,6 +81,33 @@ export interface SetupInput {
   displayName: string;
 }
 
+export interface AssistantRequestRecord {
+  id: string;
+  ownerUserId: string;
+  message: string;
+  status: "PENDING_ROUTING" | "ROUTED" | "NEEDS_CLARIFICATION" | "CANCELLED";
+  executionMode: string | null;
+  confidence: number | null;
+  routingReason: string | null;
+  requiresClarification: boolean | null;
+  goalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssistantIntakeReceipt {
+  request: AssistantRequestRecord;
+  router: {
+    state: "PENDING_RUNTIME" | "ROUTED" | "NEEDS_CLARIFICATION";
+    executionMode: "DIRECT_RESPONSE" | "SINGLE_ACTION" | "DETERMINISTIC_AUTOMATION"
+      | "CHANGE_WATCHER" | "BOUNDED_AGENT" | "HYBRID_GOAL" | "MULTI_TASK_PLAN" | null;
+    confidence: number | null;
+    reason: string;
+    requiresClarification: boolean | null;
+  };
+  assistantMessage: string;
+}
+
 export type GoalStatus = "INBOX" | "CLARIFYING" | "PLANNING" | "ACTIVE" | "WAITING"
   | "WAITING_AUTH" | "NEEDS_APPROVAL" | "RETRYING" | "BLOCKED" | "COMPLETED" | "CANCELLED";
 export type AutonomyLevel = "OBSERVE" | "PREPARE" | "ASK_BEFORE_ACT" | "ACT_WITHIN_POLICY" | "FULLY_AUTOMATED";
@@ -215,6 +242,7 @@ export type AgentEvent =
   | { type: "settings.updated"; data: Settings }
   | { type: "system.status"; data: SystemStatus }
   | { type: "provider.openai.updated"; data: OpenAIConnection }
+  | { type: "assistant.request.received"; data: AssistantRequestRecord }
   | { type: "project.created"; data: ProjectRecord }
   | { type: "goal.accepted" | "goal.paused" | "goal.resumed" | "goal.cancelled" | "goal.progressed" | "goal.blocked" | "goal.completed"; data: GoalRecord }
   | { type: "commitment.created" | "commitment.fulfilled" | "commitment.cancelled"; data: CommitmentRecord }

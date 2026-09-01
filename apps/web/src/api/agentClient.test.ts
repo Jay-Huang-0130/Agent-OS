@@ -93,4 +93,32 @@ describe("AgentClient", () => {
     expect(headers.get("x-csrf-token")).toBe("csrf-phase-4");
     expect(headers.get("idempotency-key")).toBeTruthy();
   });
+
+  it("sends unclassified natural language through the unified assistant intake", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: "Agent-OS", version: "0.1.0", setupRequired: false, secure: true, hostname: "pi",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true, csrfToken: "csrf-assistant", user: { id: "owner", displayName: "Owner", initials: "OW" },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        request: { id: "request-1", message: "幫我找實習", status: "PENDING_ROUTING" },
+        router: { state: "PENDING_RUNTIME", executionMode: null, confidence: null },
+        assistantMessage: "已保存",
+      }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentClient();
+    await client.bootstrap();
+
+    await client.submitAssistantRequest("幫我找實習");
+
+    const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(path).toBe("/api/v1/assistant/requests");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ message: "幫我找實習" });
+    expect(headers.get("x-csrf-token")).toBe("csrf-assistant");
+    expect(headers.get("idempotency-key")).toBeTruthy();
+  });
 });

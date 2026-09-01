@@ -1,5 +1,7 @@
 import type {
   ActivityItem,
+  AssistantIntakeReceipt,
+  AssistantRequestRecord,
   ApprovalRecord,
   AgentEvent,
   BootstrapResponse,
@@ -81,6 +83,18 @@ export class AgentClient {
       this.request<ActivityItem[]>("/api/v1/activity"),
     ]);
     return { system, activity };
+  }
+
+  submitAssistantRequest(message: string): Promise<AssistantIntakeReceipt> {
+    return this.request<AssistantIntakeReceipt>("/api/v1/assistant/requests", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({ message }),
+    }, true);
+  }
+
+  assistantRequests(limit = 50): Promise<AssistantRequestRecord[]> {
+    return this.request<AssistantRequestRecord[]>(`/api/v1/assistant/requests?limit=${limit}`);
   }
 
   portfolio(): Promise<PortfolioSnapshot> {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { AssistantIntakeService, type RequestRouter } from "./assistantIntake.js";
 import { AgentDatabase } from "./database.js";
 import { KernelError, ResponsibilityKernel } from "./responsibilityKernel.js";
 
@@ -27,6 +28,32 @@ function goalInput(projectId?: string) {
   };
 }
 
+test("assistant intake delegates classification to the configured Request Router", async () => {
+  const { database, owner } = fixture("assistant-router");
+  const router: RequestRouter = {
+    async route(input) {
+      assert.equal(input.message, "每天早上九點告訴我天氣");
+      return {
+        state: "ROUTED",
+        executionMode: "DETERMINISTIC_AUTOMATION",
+        confidence: 0.98,
+        reason: "A fixed schedule and weather capability are sufficient.",
+        requiresClarification: false,
+      };
+    },
+  };
+  const intake = new AssistantIntakeService(database, router);
+  try {
+    const receipt = await intake.accept(owner.id, "每天早上九點告訴我天氣", "assistant-router-1");
+    assert.equal(receipt.router.executionMode, "DETERMINISTIC_AUTOMATION");
+    assert.equal(receipt.request.status, "ROUTED");
+    assert.equal(receipt.request.confidence, 0.98);
+    assert.equal(receipt.request.goalId, null);
+  } finally {
+    database.close();
+  }
+});
+
 test("migration upgrades a pre-migration Phase 0–2 database without losing owner data", () => {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-legacy-migration-"));
   const path = join(stateDir, "agent-os.db");
@@ -45,7 +72,7 @@ test("migration upgrades a pre-migration Phase 0–2 database without losing own
 
   const upgraded = new AgentDatabase(path);
   assert.equal(upgraded.getOwner()?.displayName, "Legacy Owner");
-  assert.deepEqual(upgraded.migrationVersions(), [1, 2]);
+  assert.deepEqual(upgraded.migrationVersions(), [1, 2, 3]);
   const tables = upgraded.db.prepare(`SELECT name FROM sqlite_schema
     WHERE type = 'table' AND name IN ('projects', 'goals', 'events', 'outbox') ORDER BY name`).all() as Array<{
     name: string;
@@ -59,12 +86,12 @@ test("Phase 3 migration is repeatable and preserves durable Goal state", () => {
   database.addActivity("system", "Before restart", "Baseline data must survive.");
   const project = kernel.createProject(owner.id, { name: "Agent-OS" }, "project-1");
   const goal = kernel.createGoal(owner.id, goalInput(project.id), "goal-1");
-  assert.deepEqual(database.migrationVersions(), [1, 2]);
+  assert.deepEqual(database.migrationVersions(), [1, 2, 3]);
   database.close();
 
   const reopened = new AgentDatabase(path);
   const restartedKernel = new ResponsibilityKernel(reopened);
-  assert.deepEqual(reopened.migrationVersions(), [1, 2]);
+  assert.deepEqual(reopened.migrationVersions(), [1, 2, 3]);
   assert.equal(reopened.listActivity()[0]?.title, "Before restart");
   assert.equal(restartedKernel.getGoal(goal.id, owner.id).status, "ACTIVE");
   assert.equal(restartedKernel.getGoal(goal.id, owner.id).contract.completionCriteria.length, 1);
