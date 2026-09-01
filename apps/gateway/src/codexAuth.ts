@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import type { GatewayConfig } from "./config.js";
+import { ModelRuntimeError, type ModelRunRequest, type ModelRunResult, type ModelRuntime, type ModelUsage } from "./modelRuntime.js";
 
 export type OpenAIConnectionState = "unavailable" | "disconnected" | "connecting" | "connected" | "error";
 
@@ -35,19 +36,33 @@ type PendingRequest = {
   reject(error: Error): void;
   timer: NodeJS.Timeout;
 };
+type PendingTurn = {
+  threadId: string;
+  turnId: string;
+  text: string;
+  usage: ModelUsage;
+  model: string;
+  startedAt: number;
+  onDelta?: ((delta: string, runId: string) => void) | undefined;
+  resolve(value: { text: string; usage: ModelUsage; durationMs: number }): void;
+  reject(error: Error): void;
+  timer: NodeJS.Timeout;
+};
 
 function safeMessage(value: unknown): string {
   const message = value instanceof Error ? value.message : String(value ?? "Unknown Codex error");
   return message.replace(/[\r\n]+/gu, " ").slice(0, 500);
 }
 
-export class CodexAuthBridge implements OpenAIAuthService {
+export class CodexAuthBridge implements OpenAIAuthService, ModelRuntime {
   private readonly events = new EventEmitter();
   private child: ChildProcessWithoutNullStreams | undefined;
   private starting: Promise<void> | undefined;
   private stdoutBuffer = "";
   private nextId = 1;
   private readonly pending = new Map<number, PendingRequest>();
+  private readonly turns = new Map<string, PendingTurn>();
+  private readonly runTurns = new Map<string, { threadId: string; turnId: string }>();
   private activeLoginId: string | undefined;
   private shuttingDown = false;
 
@@ -134,6 +149,40 @@ export class CodexAuthBridge implements OpenAIAuthService {
     }
 
     const params = (message.params ?? {}) as Record<string, unknown>;
+    const turnId = typeof params.turnId === "string"
+      ? params.turnId
+      : typeof (params.turn as Record<string, unknown> | undefined)?.id === "string"
+        ? String((params.turn as Record<string, unknown>).id) : undefined;
+    const pendingTurn = turnId ? this.turns.get(turnId) : undefined;
+    if (pendingTurn && message.method === "item/agentMessage/delta" && typeof params.delta === "string") {
+      pendingTurn.text += params.delta;
+      pendingTurn.onDelta?.(params.delta, turnId as string);
+    }
+    if (pendingTurn && message.method === "thread/tokenUsage/updated") {
+      const tokenUsage = params.tokenUsage as Record<string, unknown> | undefined;
+      const last = tokenUsage?.last as Record<string, unknown> | undefined;
+      if (last) pendingTurn.usage = {
+        inputTokens: Number(last.inputTokens ?? 0), outputTokens: Number(last.outputTokens ?? 0),
+        cachedInputTokens: Number(last.cachedInputTokens ?? 0), reasoningTokens: Number(last.reasoningOutputTokens ?? 0),
+      };
+    }
+    if (pendingTurn && message.method === "error" && params.willRetry !== true) {
+      const detail = params.error as Record<string, unknown> | undefined;
+      this.finishTurn(turnId as string, new Error(safeMessage(detail?.message ?? "Codex turn failed.")));
+    }
+    if (pendingTurn && message.method === "turn/completed") {
+      const turn = params.turn as Record<string, unknown> | undefined;
+      const status = String(turn?.status ?? "failed");
+      const items = Array.isArray(turn?.items) ? turn.items as Array<Record<string, unknown>> : [];
+      const finalText = [...items].reverse().find((item) => item.type === "agentMessage" && typeof item.text === "string")?.text;
+      if (typeof finalText === "string" && finalText.length > 0) pendingTurn.text = finalText;
+      if (status === "completed") this.finishTurn(turnId as string);
+      else if (status === "interrupted") this.finishTurn(turnId as string, new ModelRuntimeError("interrupted", "Codex turn was interrupted.", false));
+      else {
+        const detail = turn?.error as Record<string, unknown> | undefined;
+        this.finishTurn(turnId as string, new Error(safeMessage(detail?.message ?? `Codex turn ended with ${status}.`)));
+      }
+    }
     if (message.method === "account/login/completed") {
       const completedId = typeof params.loginId === "string" ? params.loginId : undefined;
       if (!completedId || completedId === this.activeLoginId) this.activeLoginId = undefined;
@@ -146,6 +195,16 @@ export class CodexAuthBridge implements OpenAIAuthService {
     if (message.method === "account/updated") void this.status(false);
   }
 
+  private finishTurn(turnId: string, error?: Error): void {
+    const turn = this.turns.get(turnId);
+    if (!turn) return;
+    this.turns.delete(turnId);
+    this.runTurns.delete(turnId);
+    clearTimeout(turn.timer);
+    if (error) turn.reject(error);
+    else turn.resolve({ text: turn.text, usage: turn.usage, durationMs: Date.now() - turn.startedAt });
+  }
+
   private handleExit(error: Error): void {
     this.child = undefined;
     this.stdoutBuffer = "";
@@ -154,6 +213,7 @@ export class CodexAuthBridge implements OpenAIAuthService {
       pending.reject(error);
     }
     this.pending.clear();
+    for (const turn of [...this.turns.values()]) this.finishTurn(turn.turnId, error);
     if (!this.shuttingDown) this.publish({ available: false, state: "error", authMode: null, error: safeMessage(error) });
   }
 
@@ -233,6 +293,58 @@ export class CodexAuthBridge implements OpenAIAuthService {
     this.publish({ available: true, state: "disconnected", authMode: null });
   }
 
+  async run<T>(input: ModelRunRequest<T>): Promise<ModelRunResult<T>> {
+    await this.ensureStarted();
+    const threadResponse = await this.request("thread/start", {
+      cwd: this.config.stateDir,
+      approvalPolicy: "never",
+      sandbox: "read-only",
+      ephemeral: true,
+      baseInstructions: input.instructions,
+      developerInstructions: "Do not mutate files or external systems. Return only the requested final output.",
+    }, 30_000);
+    const thread = threadResponse.thread as Record<string, unknown> | undefined;
+    const threadId = typeof thread?.id === "string" ? thread.id : undefined;
+    if (!threadId) throw new ModelRuntimeError("provider_error", "Codex returned an invalid thread response.", true);
+    const turnResponse = await this.request("turn/start", {
+      threadId,
+      input: [{ type: "text", text: input.input, text_elements: [] }],
+      outputSchema: input.outputSchema,
+    }, 30_000);
+    const turn = turnResponse.turn as Record<string, unknown> | undefined;
+    const turnId = typeof turn?.id === "string" ? turn.id : undefined;
+    if (!turnId) throw new ModelRuntimeError("provider_error", "Codex returned an invalid turn response.", true);
+    const timeoutMs = Math.max(1_000, input.timeoutMs ?? 60_000);
+    const completed = await new Promise<{ text: string; usage: ModelUsage; durationMs: number }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.turns.delete(turnId);
+        this.runTurns.delete(turnId);
+        void this.request("turn/interrupt", { threadId, turnId }, 10_000).catch(() => {});
+        reject(new ModelRuntimeError("timeout", `Codex turn timed out after ${timeoutMs} ms.`, true));
+      }, timeoutMs);
+      this.turns.set(turnId, { threadId, turnId, text: "", usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0 },
+        model: typeof threadResponse.model === "string" ? threadResponse.model : "unknown", startedAt: Date.now(),
+        onDelta: input.onDelta, resolve, reject, timer });
+      this.runTurns.set(turnId, { threadId, turnId });
+    });
+    let raw: unknown;
+    try { raw = JSON.parse(completed.text); }
+    catch { throw new ModelRuntimeError("invalid_output", "Codex returned output that was not valid JSON.", true); }
+    let output: T;
+    try { output = input.parse(raw); }
+    catch (error) { throw new ModelRuntimeError("invalid_output", safeMessage(error), true); }
+    return { runId: turnId, provider: "codex_app_server",
+      model: typeof threadResponse.model === "string" ? threadResponse.model : "unknown",
+      threadId, turnId, output, usage: completed.usage, durationMs: completed.durationMs };
+  }
+
+  async interrupt(runId: string): Promise<boolean> {
+    const target = this.runTurns.get(runId);
+    if (!target) return false;
+    await this.request("turn/interrupt", target, 10_000);
+    return true;
+  }
+
   async close(): Promise<void> {
     this.shuttingDown = true;
     const child = this.child;
@@ -243,6 +355,12 @@ export class CodexAuthBridge implements OpenAIAuthService {
       pending.reject(new Error("Codex app-server is shutting down."));
     }
     this.pending.clear();
+    for (const turn of this.turns.values()) {
+      clearTimeout(turn.timer);
+      turn.reject(new ModelRuntimeError("interrupted", "Codex app-server is shutting down.", false));
+    }
+    this.turns.clear();
+    this.runTurns.clear();
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         try { child.kill("SIGKILL"); } catch { /* Process already stopped. */ }

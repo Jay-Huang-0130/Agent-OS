@@ -20,6 +20,8 @@ import type { GatewayConfig } from "./config.js";
 import { publicDeviceName } from "./config.js";
 import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
 import { AgentDatabase, type ActivityRecord } from "./database.js";
+import { ModelRuntimeError, TrackedModelRuntime, type ModelRuntime } from "./modelRuntime.js";
+import { ModelAiWakeExecutor, Phase6AssistantExecutor, Phase6RequestRouter } from "./phase6Runtime.js";
 import { collectSystemStatus } from "./metrics.js";
 import {
   autonomyLevels,
@@ -172,6 +174,7 @@ export interface BuildAppOptions {
   logger?: boolean;
   openAIAuth?: OpenAIAuthService;
   requestRouter?: RequestRouter;
+  modelRuntime?: ModelRuntime;
   capabilityExecutor?: CapabilityExecutor;
   aiWakeExecutor?: AiWakeExecutor;
   wakeEngine?: Omit<WakeEngineOptions, "notify" | "aiExecutor">;
@@ -285,9 +288,6 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   });
   const database = new AgentDatabase(config.databasePath);
   const kernel = new ResponsibilityKernel(database);
-  const assistantIntake = options.requestRouter
-    ? new AssistantIntakeService(database, options.requestRouter)
-    : new AssistantIntakeService(database);
   const capabilityExecutor = options.capabilityExecutor ?? new PythonJsonExecutor(config.pythonExecutable);
   const capabilityService = new CapabilityService(database, capabilityExecutor);
   const automationService = new AutomationService(database, capabilityService);
@@ -305,13 +305,26 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       }
     }
   };
+  const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
+  const authRuntime = typeof (openAIAuth as Partial<ModelRuntime>).run === "function"
+    ? openAIAuth as OpenAIAuthService & ModelRuntime : undefined;
+  const rawModelRuntime = options.modelRuntime ?? authRuntime;
+  const modelRuntime = rawModelRuntime ? new TrackedModelRuntime(database, rawModelRuntime) : undefined;
+  const requestRouter = options.requestRouter ?? (modelRuntime ? new Phase6RequestRouter(modelRuntime) : undefined);
+  const assistantExecution = modelRuntime
+    ? new Phase6AssistantExecutor(modelRuntime, kernel, capabilityService, automationService,
+      (event) => broadcast(event))
+    : undefined;
+  const assistantIntake = requestRouter
+    ? new AssistantIntakeService(database, requestRouter, options.requestRouter ? undefined : assistantExecution)
+    : new AssistantIntakeService(database);
+  const aiWakeExecutor = options.aiWakeExecutor ?? (modelRuntime ? new ModelAiWakeExecutor(modelRuntime, database, kernel) : undefined);
   const wakeEngine = new WakeEngine(database, capabilityService, capabilityExecutor, {
     ...options.wakeEngine,
-    ...(options.aiWakeExecutor ? { aiExecutor: options.aiWakeExecutor } : {}),
+    ...(aiWakeExecutor ? { aiExecutor: aiWakeExecutor } : {}),
     notify: (item) => broadcast({ type: "notification.created", data: item }),
   });
   if (options.startWakeEngine !== false) wakeEngine.start();
-  const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
   const stopOpenAIUpdates = openAIAuth.onUpdate((status) => {
     broadcast({ type: "provider.openai.updated", data: status });
   });
@@ -474,6 +487,11 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       return reply.code(202).send(receipt);
     } catch (error) {
       if (error instanceof AssistantIntakeError) return apiError(reply, 409, error.code, error.message);
+      if (error instanceof ModelRuntimeError) {
+        const status = error.code === "timeout" ? 504 : error.code === "invalid_output" ? 422 : 503;
+        return apiError(reply, status, `model_${error.code}`, error.message);
+      }
+      if (error instanceof Phase5Error) return phase5ApiError(reply, error);
       throw error;
     }
   });
@@ -807,6 +825,19 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   app.get("/api/v1/providers/openai", async (request, reply) => {
     if (!requireSession(request, reply, database)) return;
     return openAIAuth.status(false);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/model-runs/:id/interrupt", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    if (!modelRuntime) return apiError(reply, 503, "model_runtime_unavailable", "The model runtime is unavailable.");
+    const row = database.db.prepare("SELECT status FROM model_runs WHERE id = ? AND owner_user_id = ?")
+      .get(request.params.id, session.userId) as Record<string, unknown> | undefined;
+    if (!row) return apiError(reply, 404, "model_run_not_found", "Model run not found.");
+    if (row.status !== "RUNNING") return apiError(reply, 409, "model_run_not_running", "Model run is no longer running.");
+    const interrupted = await modelRuntime.interrupt(request.params.id);
+    if (!interrupted) return apiError(reply, 409, "model_run_not_interruptible", "The model run cannot be interrupted yet.");
+    return reply.code(202).send({ id: request.params.id, status: "INTERRUPTING" });
   });
 
   app.post("/api/v1/providers/openai/oauth/start", async (request, reply) => {

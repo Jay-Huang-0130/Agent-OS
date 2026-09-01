@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
 import type { OpenAIAuthService, OpenAIConnection } from "./codexAuth.js";
 import { loadConfig } from "./config.js";
+import type { ModelRunRequest, ModelRunResult, ModelRuntime } from "./modelRuntime.js";
 import type { CapabilityExecutor } from "./wakeEngine.js";
 
 const apps: FastifyInstance[] = [];
@@ -15,7 +16,7 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor) {
+async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor, modelRuntime?: ModelRuntime) {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-gateway-"));
   const config = loadConfig({
     stateDir,
@@ -26,10 +27,20 @@ async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: Capa
   const app = await buildApp(config, {
     ...(openAIAuth ? { openAIAuth } : {}),
     ...(capabilityExecutor ? { capabilityExecutor } : {}),
+    ...(modelRuntime ? { modelRuntime } : {}),
     startWakeEngine: false,
   });
   apps.push(app);
   return { app, config };
+}
+
+class DirectResponseRuntime implements ModelRuntime {
+  async run<T>(request: ModelRunRequest<T>): Promise<ModelRunResult<T>> {
+    const output = request.parse({ message: "這是由已連線的模型直接回答。" });
+    return { runId: "provider-run", provider: "fake", model: "fake-model", threadId: "thread", turnId: "turn",
+      output, usage: { inputTokens: 8, outputTokens: 12, cachedInputTokens: 0, reasoningTokens: 0 }, durationMs: 2 };
+  }
+  async interrupt(): Promise<boolean> { return true; }
 }
 
 class FakeOpenAIAuth implements OpenAIAuthService {
@@ -405,7 +416,7 @@ test("Phase 4 API exposes commitments, portfolio projection and Project detail",
 });
 
 test("unified assistant intake persists natural language without prematurely creating a Goal", async () => {
-  const { app, config } = await fixture();
+  const { app, config } = await fixture(new FakeOpenAIAuth());
   const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
   const setup = await app.inject({
     method: "POST",
@@ -445,6 +456,25 @@ test("unified assistant intake persists natural language without prematurely cre
   const goals = await app.inject({ method: "GET", url: "/api/v1/goals", headers: { cookie } });
   assert.equal(goals.statusCode, 200);
   assert.deepEqual(goals.json(), []);
+});
+
+test("Phase 6 assistant answers a question through the model runtime without creating a Goal", async () => {
+  const { app, config } = await fixture(new FakeOpenAIAuth(), undefined, new DirectResponseRuntime());
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({ method: "POST", url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" } });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const accepted = await app.inject({ method: "POST", url: "/api/v1/assistant/requests",
+    headers: { cookie, "x-csrf-token": session.json().csrfToken as string, "idempotency-key": "phase6-direct" },
+    payload: { message: "Responsibility Kernel 是什麼？" } });
+  assert.equal(accepted.statusCode, 202);
+  assert.equal(accepted.json().router.executionMode, "DIRECT_RESPONSE");
+  assert.equal(accepted.json().assistantMessage, "這是由已連線的模型直接回答。");
+  assert.equal(accepted.json().request.modelRunId !== null, true);
+  const goals = await app.inject({ method: "GET", url: "/api/v1/goals", headers: { cookie } });
+  assert.equal(goals.json().length, 0);
 });
 
 test("Phase 5 API registers a generated Capability and schedules it without domain hardcoding", async () => {

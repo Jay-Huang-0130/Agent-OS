@@ -5,9 +5,9 @@
 
 Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接受委託、持續工作、使用不同裝置能力，並對結果負責的私人 AI 作業層。
 
-專案目前已完成 Phase 0–5：可攜式基礎架構、Durable Responsibility Store、Secretary Portfolio，以及通用 Wake Engine／動態 Generated Capability runner。OpenAI 官方 Codex app-server／ChatGPT OAuth 連線也已就緒；自然語言 Router、Goal Compiler 與模型執行層會在 Phase 6 接入。
+專案目前已完成 Phase 0–6：可攜式基礎架構、Durable Responsibility Store、Secretary Portfolio、通用 Wake Engine，以及以 ChatGPT OAuth 驅動的 Codex Model Runtime／Request Router／Goal Compiler／Bounded Agent。
 
-## Phase 0–5 已完成
+## Phase 0–6 已完成
 
 - Agent-OS 自帶固定版本的 Node.js 24 LTS，不安裝系統 Node、不執行全域 `npm install`。
 - 正式支援 64-bit Raspberry Pi OS／Debian／Ubuntu 的 ARM64 與 x64。
@@ -21,6 +21,8 @@ Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接�
 - Project／Goal 建立和控制、Priority、Deadline、Autonomy、Attention Policy 與 Approval decision 都使用 durable API，不使用前端假資料。
 - Wake Engine 支援 durable claim、concurrency、misfire、startup reconciliation、exponential backoff、notification outbox 與 usage ledger。
 - AI 可提交 owner-specific、版本化的 LOW-risk Python JSON Capability；production code 不硬編碼天氣、公車或地圖流程。
+- 單一聊天入口會自動判斷 execution mode；低信心與高風險要求先澄清，持續責任會建立版本化 Goal Contract、Plan IR 與 bounded Task Packet。
+- Codex app-server 支援 structured output、stream delta、interrupt，以及 durable model usage／error／timeout 紀錄。
 
 完整說明與開發流程請見 [Phase 0–2 實作說明](docs/PHASE-0-2.md)。
 
@@ -140,7 +142,7 @@ agent-osctl browser update
 agent-osctl browser password
 ```
 
-目前 `agent-osctl` 管理 Gateway、Web 介面與選用的瀏覽器元件；Goal Engine、Agent Runtime、模型與 Device Mesh 等仍是後續階段。
+目前 `agent-osctl` 管理 Gateway、Web 介面與選用的瀏覽器元件；Goal／Plan Runtime 與模型層已由 Gateway 提供，Watcher delta pipeline、完整 Browser Agent 與 Device Mesh 仍是後續階段。
 
 ## 目前人類操作與未來 Agent 操作
 
@@ -201,16 +203,17 @@ bash ./install.sh --force-agent-web-update
 - [Phase 3 Durable Responsibility Store](docs/PHASE-3.md)：資料模型、狀態機、Event/Outbox、Lease、recovery、idempotency 與 Goal API。
 - [Phase 4 Secretary Portfolio MVP](docs/PHASE-4.md)：Portfolio projection、Commitment、Approval、Project Detail 與真實 Web UI。
 - [Phase 5 Wake Engine](docs/PHASE-5.md)：AI-first 分流邊界、Generated Capability、misfire、retry、notification 與 usage ledger。
+- [Phase 6 Model Runtime](docs/PHASE-6.md)：Codex adapter、Request Router、Goal Compiler、Plan IR、Result Envelope 與 Bounded Agent。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
 - [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、headless 裝置代碼登入、隔離與 API。
 
 ## 專案狀態
 
-目前版本已具備 durable responsibility kernel、Secretary Portfolio、背景 Wake Worker 與通用 deterministic Capability runner。Phase 5 不負責理解自然語言：簡單任務要先由 Phase 6 Router 判定後才產生受控程式；複雜任務則建立 AI execution Wake，避免為了省 token 強行程式化。OpenAI 登入使用適合樹莓派與遠端伺服器的 ChatGPT device-code 流程，OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
+目前版本已具備 durable responsibility kernel、Secretary Portfolio、背景 Wake Worker、通用 deterministic Capability runner，以及真正連到 Kernel 的 Codex Model Runtime。簡單、低風險且可驗證的固定任務才產生受控程式；複雜任務建立 AI execution Wake，不會為了省 token 強行程式化。OpenAI 登入使用適合樹莓派與遠端伺服器的 ChatGPT device-code 流程，OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
 
 後續建議依序實作：
 
-1. Agent Runtime、Request Router、Goal Compiler 與模型抽象層（Phase 6）。
+1. Watcher delta pipeline 與 Hybrid long-term Goal（Phase 7）。
 2. Watcher 與 Agent Web protected Adapter。
 3. Memory、Artifact workflow 與 Human Takeover。
 4. Device identity 與 Personal Device Mesh。

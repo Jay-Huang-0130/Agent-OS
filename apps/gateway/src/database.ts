@@ -40,6 +40,8 @@ export interface AssistantRequestRecord {
   routingReason: string | null;
   requiresClarification: boolean | null;
   goalId: string | null;
+  assistantMessage: string | null;
+  modelRunId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -475,6 +477,39 @@ const migrations: Migration[] = [
       ON notification_outbox(status, available_at, created_at);
     `,
   },
+  {
+    version: 5,
+    name: "phase_6_model_and_plan_runtime",
+    sql: `
+      ALTER TABLE assistant_requests ADD COLUMN assistant_message TEXT;
+      ALTER TABLE assistant_requests ADD COLUMN model_run_id TEXT;
+
+      CREATE TABLE IF NOT EXISTS model_runs (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        request_id TEXT REFERENCES assistant_requests(id) ON DELETE SET NULL,
+        goal_id TEXT REFERENCES goals(id) ON DELETE SET NULL,
+        task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+        purpose TEXT NOT NULL CHECK (purpose IN ('ROUTER', 'DIRECT_RESPONSE', 'GOAL_COMPILER', 'WORKER', 'VERIFIER', 'WAKE')),
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        thread_id TEXT,
+        turn_id TEXT,
+        status TEXT NOT NULL CHECK (status IN ('RUNNING', 'COMPLETED', 'FAILED', 'TIMED_OUT', 'INTERRUPTED')),
+        output_json TEXT,
+        error_json TEXT,
+        usage_json TEXT,
+        budget_json TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS model_runs_owner_created_idx ON model_runs(owner_user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS model_runs_goal_created_idx ON model_runs(goal_id, created_at DESC);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {
@@ -690,6 +725,8 @@ export class AgentDatabase {
       routingReason: null,
       requiresClarification: null,
       goalId: null,
+      assistantMessage: null,
+      modelRunId: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -741,6 +778,21 @@ export class AgentDatabase {
     return assistantRequestFromRow(row);
   }
 
+  recordAssistantOutcome(id: string, ownerUserId: string, outcome: {
+    assistantMessage: string;
+    goalId?: string | undefined;
+    modelRunId?: string | undefined;
+  }): AssistantRequestRecord {
+    const now = new Date().toISOString();
+    const changed = this.db.prepare(`UPDATE assistant_requests SET assistant_message = ?, goal_id = ?,
+      model_run_id = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?`)
+      .run(outcome.assistantMessage, outcome.goalId ?? null, outcome.modelRunId ?? null, now, id, ownerUserId);
+    if (Number(changed.changes) !== 1) throw new Error("Assistant request is missing.");
+    const row = this.db.prepare("SELECT * FROM assistant_requests WHERE id = ? AND owner_user_id = ?")
+      .get(id, ownerUserId) as Record<string, unknown>;
+    return assistantRequestFromRow(row);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -757,6 +809,8 @@ function assistantRequestFromRow(row: Record<string, unknown>): AssistantRequest
     routingReason: row.routing_reason === null ? null : asString(row.routing_reason),
     requiresClarification: row.requires_clarification === null ? null : Number(row.requires_clarification) === 1,
     goalId: row.goal_id === null ? null : asString(row.goal_id),
+    assistantMessage: row.assistant_message === null || row.assistant_message === undefined ? null : asString(row.assistant_message),
+    modelRunId: row.model_run_id === null || row.model_run_id === undefined ? null : asString(row.model_run_id),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };

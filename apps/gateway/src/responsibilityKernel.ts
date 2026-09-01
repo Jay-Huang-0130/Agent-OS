@@ -125,6 +125,16 @@ export interface TaskRecord {
   updatedAt: string;
 }
 
+export interface PlanRecord {
+  id: string;
+  goalId: string;
+  version: number;
+  status: "DRAFT" | "ACTIVE" | "SUPERSEDED" | "COMPLETED" | "CANCELLED";
+  plan: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface LeaseRecord {
   resourceType: string;
   resourceId: string;
@@ -1248,6 +1258,33 @@ export class ResponsibilityKernel {
         occurredAt: now,
       });
       return this.requireTask(id);
+    });
+  }
+
+  createPlan(goalId: string, ownerUserId: string, plan: Record<string, unknown>): PlanRecord {
+    return this.transaction(() => {
+      const goal = this.requireGoal(goalId, ownerUserId);
+      const previous = this.db.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM plans WHERE goal_id = ?")
+        .get(goalId) as Record<string, unknown>;
+      const version = Number(previous.version) + 1;
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      this.db.prepare("UPDATE plans SET status = 'SUPERSEDED', updated_at = ? WHERE goal_id = ? AND status = 'ACTIVE'")
+        .run(now, goalId);
+      this.db.prepare(`INSERT INTO plans (id, goal_id, version, status, plan_json, created_at, updated_at)
+        VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?)`)
+        .run(id, goalId, version, JSON.stringify(plan), now, now);
+      this.appendEvent({
+        projectId: goal.projectId,
+        goalId,
+        aggregateType: "plan",
+        aggregateId: id,
+        type: "plan.activated",
+        data: { version, nodeCount: Array.isArray(plan.nodes) ? plan.nodes.length : 0 },
+        actor: ownerUserId,
+        occurredAt: now,
+      });
+      return { id, goalId, version, status: "ACTIVE", plan, createdAt: now, updatedAt: now };
     });
   }
 

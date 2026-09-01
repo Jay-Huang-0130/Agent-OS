@@ -42,17 +42,16 @@ Repo 已有、不要重做：
 - Codex App Server 整合基礎。
 - Headless Raspberry Pi 的 ChatGPT device-code OAuth。
 - Agent-Web 既有整合入口。
+- Codex structured Model Runtime、Request Router、Goal Compiler、Plan IR 與 bounded Result Envelope。
+- Secretary Portfolio、Commitment service、deterministic automation 與 Generated Capability。
 
 目前尚未完成的 Secretary / Execution 部分：
 
-- Secretary Portfolio、Today、Waiting on You、Decision Queue。
-- Commitment service、Portfolio projection 與 Project Detail API。
-- Deterministic automation 與 Watcher。
-- Goal Compiler、Plan IR、bounded ReAct、Verifier。
+- Watcher delta／fingerprint pipeline 與 Hybrid long-term Goal。
 - Browser Authentication Gate。
 - Project Memory、Experience、Skill 與受控自主進步。
 
-下一個實作階段是 Phase 6，不回頭重寫已完成的 Phase 0–5。
+下一個實作階段是 Phase 7，不回頭重寫已完成的 Phase 0–6。
 
 ---
 
@@ -271,6 +270,8 @@ Goal 仍保持 ACTIVE，直到使用者取消
 ---
 
 ## Phase 6：Model Runtime、Goal Compiler 與 Bounded Agent
+
+狀態：`COMPLETED`（詳見 [Phase 6 實作說明](PHASE-6.md)）
 
 目標：讓現有 OAuth 真正服務 Responsibility Kernel，而不是只提供聊天。
 

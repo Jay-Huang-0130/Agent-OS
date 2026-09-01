@@ -357,7 +357,7 @@ function TaskDrawer({ task, onClose }: { task: DemoTask; onClose: () => void }) 
   </div>;
 }
 
-function AssistantPanel({ onClose }: { onClose: () => void }) {
+function AssistantPanel({ onClose, stream, onStart }: { onClose: () => void; stream: string; onStart: () => void }) {
   const [message, setMessage] = useState("");
   const [requests, setRequests] = useState<AssistantRequestRecord[]>([]);
   const [assistantMessage, setAssistantMessage] = useState("");
@@ -370,6 +370,7 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
     event.preventDefault();
     const content = message.trim();
     if (!content || busy) return;
+    onStart();
     setBusy(true);
     setError("");
     try {
@@ -388,8 +389,8 @@ function AssistantPanel({ onClose }: { onClose: () => void }) {
       <header className="assistant-head"><div className="assistant-identity"><span><Icon name="sparkle" /></span><div><strong id="assistant-title">Agent-OS</strong><small><i />單一自然語言入口</small></div></div><button className="icon-only" onClick={onClose} aria-label="關閉助手"><Icon name="close" /></button></header>
       <div className="assistant-body">
         {!requests.length && !assistantMessage && <div className="assistant-welcome"><p>直接告訴我你需要什麼</p><span>你不需要先判斷這是聊天、一次性工作、自動化或長期 Goal；Request Router 會負責分類。</span></div>}
-        {!!requests.length && <div className="assistant-request-history">{requests.map((item) => <article key={item.id}><p>{item.message}</p><small><i />{item.status === "PENDING_ROUTING" ? "等待 Request Router 分析" : item.status}</small></article>)}</div>}
-        {assistantMessage && <div className="accepted-task"><div className="accepted-icon"><Icon name="model" /></div><div><p className="eyebrow">Intake saved</p><h3>訊息已安全保存</h3><p>{assistantMessage}</p></div></div>}
+        {!!requests.length && <div className="assistant-request-history">{requests.map((item) => <div className="assistant-exchange" key={item.id}><article><p>{item.message}</p><small><i />{item.status === "PENDING_ROUTING" ? "等待 Request Router 分析" : item.executionMode ?? item.status}</small></article>{item.assistantMessage && <div className="assistant-reply"><span><Icon name="sparkle" /></span><p>{item.assistantMessage}</p></div>}</div>)}</div>}
+        {busy && stream && <div className="assistant-reply streaming"><span><Icon name="sparkle" /></span><p>{stream.replace(/^\s*\{\s*"message"\s*:\s*"/u, "").replace(/"\s*\}\s*$/u, "").replace(/\\"/gu, "\"")}</p></div>}
         {error && <div className="error-box"><Icon name="warning" />{error}</div>}
       </div>
       <form className="assistant-compose" onSubmit={(event) => void submit(event)}><textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="問一個問題，或描述你想完成的事…" rows={2} autoFocus /><div><span><Icon name="shield" size={15} />先保存原始意圖，再由系統判斷處理方式</span><button className="send-button" disabled={busy || !message.trim()} aria-label="送出訊息">{busy ? <span className="loader" /> : <Icon name="arrow" />}</button></div></form>
@@ -527,6 +528,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [openAI, setOpenAI] = useState<OpenAIConnection>();
   const [error, setError] = useState("");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantStream, setAssistantStream] = useState("");
   const [selectedTask, setSelectedTask] = useState<DemoTask>();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -565,6 +567,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       if (event.type === "settings.updated") setSettings(event.data);
       if (event.type === "system.status") setSnapshot((current) => current ? { ...current, system: event.data } : current);
       if (event.type === "provider.openai.updated") setOpenAI(event.data);
+      if (event.type === "assistant.response.delta") setAssistantStream((current) => current + event.data.delta);
       if (event.type === "notification.created") {
         setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
         setToast(event.data);
@@ -617,7 +620,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       </main>
       <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>
     </div>
-    {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} />}
+    {assistantOpen && <AssistantPanel onClose={() => { setAssistantOpen(false); setAssistantStream(""); }} stream={assistantStream} onStart={() => setAssistantStream("")} />}
     {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(undefined)} />}
     {notificationOpen && <NotificationCenter items={notifications} onClose={() => setNotificationOpen(false)} onRead={(id) => setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item))} onReadAll={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} onOpenTask={(task) => { setNotificationOpen(false); setSelectedTask(task); }} />}
     {toast && <NotificationToast item={toast} onClose={() => setToast(undefined)} onOpen={() => { const task = demoTasks.find((item) => item.id === toast.taskId); if (task) setSelectedTask(task); setToast(undefined); }} />}

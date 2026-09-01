@@ -91,6 +91,8 @@ export interface AssistantRequestRecord {
   routingReason: string | null;
   requiresClarification: boolean | null;
   goalId: string | null;
+  assistantMessage: string | null;
+  modelRunId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -276,6 +278,7 @@ export type AgentEvent =
   | { type: "system.status"; data: SystemStatus }
   | { type: "provider.openai.updated"; data: OpenAIConnection }
   | { type: "assistant.request.received"; data: AssistantRequestRecord }
+  | { type: "assistant.response.delta"; data: { requestId: string; runId: string; delta: string } }
   | { type: "capability.validated"; data: CapabilityRecord }
   | { type: "automation.created" | "automation.cancelled"; data: AutomationRecord }
   | { type: "project.created"; data: ProjectRecord }
