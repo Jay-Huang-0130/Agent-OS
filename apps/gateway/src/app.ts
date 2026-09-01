@@ -22,6 +22,8 @@ import { AgentDatabase, type ActivityRecord } from "./database.js";
 import { collectSystemStatus } from "./metrics.js";
 import {
   autonomyLevels,
+  commitmentOwners,
+  commitmentStatuses,
   goalStatuses,
   KernelError,
   ResponsibilityKernel,
@@ -54,6 +56,7 @@ const createGoalSchema = z.object({
   completionCriteria: z.array(z.string().trim().min(1).max(2_000)).min(1).max(100),
   cancellationCriteria: z.array(z.string().trim().min(1).max(2_000)).max(100).optional(),
   externalDependencies: z.array(z.string().trim().min(1).max(2_000)).max(100).optional(),
+  deadline: z.string().datetime({ offset: true }).optional(),
   constraints: z.record(z.unknown()).optional(),
   priority: z.record(z.unknown()).optional(),
   attentionPolicy: z.record(z.unknown()).optional(),
@@ -67,6 +70,41 @@ const listGoalsQuerySchema = z.object({
 }).strict();
 const eventQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
+}).strict();
+const createCommitmentSchema = z.object({
+  goalId: z.string().uuid(),
+  owner: z.enum(commitmentOwners),
+  owedTo: z.enum(commitmentOwners),
+  promise: z.string().trim().min(1).max(4_000),
+  dueAt: z.string().datetime({ offset: true }).optional(),
+  followUpPolicy: z.enum(["remind_at_due", "remind_24h_before"]).optional(),
+}).strict();
+const listCommitmentsQuerySchema = z.object({
+  goalId: z.string().uuid().optional(),
+  projectId: z.string().uuid().optional(),
+  status: z.enum(commitmentStatuses).optional(),
+}).strict();
+const commitmentActionSchema = z.object({
+  evidenceRefs: z.array(z.string().trim().min(1).max(2_000)).max(100).optional(),
+}).strict();
+const progressGoalSchema = z.object({
+  detail: z.string().trim().min(1).max(4_000),
+  progress: z.number().min(0).max(100).optional(),
+}).strict();
+const blockGoalSchema = z.object({ reason: z.string().trim().min(1).max(2_000) }).strict();
+const completeGoalSchema = z.object({
+  reason: z.string().trim().min(1).max(2_000),
+  evidenceRefs: z.array(z.string().trim().min(1).max(2_000)).min(1).max(100),
+}).strict();
+const requestApprovalSchema = z.object({
+  goalId: z.string().uuid(),
+  taskId: z.string().uuid().optional(),
+  action: z.record(z.unknown()),
+  risk: z.string().trim().min(1).max(1_000),
+}).strict();
+const approvalDecisionSchema = z.object({
+  decision: z.enum(["APPROVED", "REJECTED"]),
+  reason: z.string().trim().min(1).max(2_000),
 }).strict();
 
 type Settings = z.infer<typeof settingsSchema>;
@@ -371,6 +409,16 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     return kernel.listProjects(session.userId);
   });
 
+  app.get<{ Params: { id: string } }>("/api/v1/projects/:id", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    try {
+      return kernel.getProjectDetail(request.params.id, session.userId);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
   app.post("/api/v1/goals", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
@@ -436,6 +484,63 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   app.post<{ Params: { id: string } }>("/api/v1/goals/:id/resume", goalAction("resume"));
   app.post<{ Params: { id: string } }>("/api/v1/goals/:id/cancel", goalAction("cancel"));
 
+  app.post<{ Params: { id: string } }>("/api/v1/goals/:id/progress", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = progressGoalSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_goal_progress", "Goal progress is invalid.");
+    try {
+      const goal = kernel.recordGoalProgress(
+        request.params.id,
+        session.userId,
+        parsed.data.detail,
+        parsed.data.progress,
+        key,
+      );
+      broadcast({ type: "goal.progressed", data: goal });
+      return goal;
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/goals/:id/block", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = blockGoalSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_goal_block", "A blocked Goal needs a reason.");
+    try {
+      const goal = kernel.blockGoal(request.params.id, session.userId, parsed.data.reason, key);
+      broadcast({ type: "goal.blocked", data: goal });
+      return goal;
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/goals/:id/complete", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = completeGoalSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_goal_completion", "Completion needs evidence and a reason.");
+    try {
+      const goal = kernel.completeGoal(
+        request.params.id,
+        session.userId,
+        parsed.data.evidenceRefs,
+        parsed.data.reason,
+      );
+      broadcast({ type: "goal.completed", data: goal });
+      return goal;
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/api/v1/goals/:id/events", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session) return;
@@ -443,6 +548,104 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     if (!parsed.success) return apiError(reply, 400, "invalid_event_filter", "Event filters are invalid.");
     try {
       return kernel.listGoalEvents(request.params.id, session.userId, parsed.data.limit);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.post("/api/v1/commitments", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = createCommitmentSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_commitment", "Commitment details are invalid.");
+    try {
+      const commitment = kernel.createCommitment(session.userId, parsed.data, key);
+      broadcast({ type: "commitment.created", data: commitment });
+      return reply.code(201).send(commitment);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/commitments", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const parsed = listCommitmentsQuerySchema.safeParse(request.query);
+    if (!parsed.success) return apiError(reply, 400, "invalid_commitment_filter", "Commitment filters are invalid.");
+    return kernel.listCommitments(session.userId, parsed.data);
+  });
+
+  const commitmentAction = (target: "FULFILLED" | "CANCELLED") => async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = commitmentActionSchema.safeParse(request.body ?? {});
+    if (!parsed.success) return apiError(reply, 400, "invalid_commitment_action", "Commitment action is invalid.");
+    try {
+      const commitment = kernel.transitionCommitment(
+        request.params.id,
+        session.userId,
+        target,
+        parsed.data.evidenceRefs ?? [],
+        key,
+      );
+      broadcast({ type: target === "FULFILLED" ? "commitment.fulfilled" : "commitment.cancelled", data: commitment });
+      return commitment;
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  };
+
+  app.post<{ Params: { id: string } }>("/api/v1/commitments/:id/fulfill", commitmentAction("FULFILLED"));
+  app.post<{ Params: { id: string } }>("/api/v1/commitments/:id/cancel", commitmentAction("CANCELLED"));
+
+  app.get("/api/v1/portfolio", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const timezone = database.getSettings(settingsDefaults()).timezone;
+    return kernel.portfolio(session.userId, timezone);
+  });
+
+  app.post("/api/v1/approvals", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = requestApprovalSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_approval", "Approval request is invalid.");
+    try {
+      const approval = kernel.requestApproval(session.userId, parsed.data, session.userId);
+      broadcast({ type: "approval.requested", data: approval });
+      return reply.code(201).send(approval);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
+  app.get("/api/v1/approvals", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return kernel.listApprovals(session.userId);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/approvals/:id/decision", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = approvalDecisionSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_approval_decision", "Approval decision is invalid.");
+    try {
+      const approval = kernel.decideApproval(
+        request.params.id,
+        session.userId,
+        parsed.data.decision,
+        parsed.data.reason,
+      );
+      broadcast({ type: parsed.data.decision === "APPROVED" ? "approval.approved" : "approval.rejected", data: approval });
+      return approval;
     } catch (error) {
       return kernelApiError(reply, error);
     }

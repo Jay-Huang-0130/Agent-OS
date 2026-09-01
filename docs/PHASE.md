@@ -35,22 +35,24 @@ Repo 已有、不要重做：
 - Fastify Gateway、React Web UI、HTTPS、WebSocket。
 - 首次 pairing、管理員登入、Session、CSRF 與 Settings。
 - SQLite WAL 基礎資料庫。
+- Durable Project、Goal、Task、Run、Wake、Event、Lease 與 Outbox 資料模型。
+- Goal / Task state machine、idempotency 與 restart reconciliation。
+- Project / Goal API 與 append-only Event Ledger。
 - 系統狀態與 Activity UI。
 - Codex App Server 整合基礎。
 - Headless Raspberry Pi 的 ChatGPT device-code OAuth。
 - Agent-Web 既有整合入口。
 
-目前尚未成為真正 Kernel 的部分：
+目前尚未完成的 Secretary / Execution 部分：
 
-- Project、Goal、Commitment、Task、Run、Wake 和 Event 資料模型。
-- Durable state machine、Lease、Outbox、Idempotency 與 restart recovery。
 - Secretary Portfolio、Today、Waiting on You、Decision Queue。
+- Commitment service、Portfolio projection 與 Project Detail API。
 - Deterministic automation 與 Watcher。
 - Goal Compiler、Plan IR、bounded ReAct、Verifier。
 - Browser Authentication Gate。
 - Project Memory、Experience、Skill 與受控自主進步。
 
-下一個實作階段是 Phase 3，不回頭重寫 Phase 0–2。
+下一個實作階段是 Phase 4，不回頭重寫已完成的 Phase 0–3。
 
 ---
 
@@ -73,6 +75,8 @@ OAuth 可在沒有 GUI 的 Pi 上由使用者裝置完成
 ---
 
 ## Phase 3：Durable Responsibility Store
+
+狀態：`COMPLETED`（詳見 [Phase 3 實作說明](PHASE-3.md)）
 
 目標：先建立不依賴 LLM 的責任真實來源。
 
@@ -139,6 +143,8 @@ Migration 可從前一版資料庫升級並保留資料
 ---
 
 ## Phase 4：Secretary Portfolio MVP
+
+狀態：`COMPLETED`（詳見 [Phase 4 實作說明](PHASE-4.md)）
 
 目標：在還沒有 AI Planner 前，先做出真正的秘書資料與介面。
 

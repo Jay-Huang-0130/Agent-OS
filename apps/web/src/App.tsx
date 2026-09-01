@@ -7,12 +7,16 @@ import type {
   NotificationItem,
   OpenAIConnection,
   OpenAIDeviceLogin,
+  GoalRecord,
+  PortfolioSnapshot,
+  ProjectRecord,
   ResourceMetric,
   Settings,
   SetupInput,
   SystemStatus,
 } from "./api/model";
 import { Icon, Logo, type IconName } from "./components/Icon";
+import { ResponsibilitiesPage, SecretaryOverview } from "./SecretaryPortfolio";
 
 type View = "overview" | "tasks" | "records" | "system" | "activity" | "settings";
 const client = new AgentClient();
@@ -350,21 +354,24 @@ function TaskDrawer({ task, onClose }: { task: DemoTask; onClose: () => void }) 
   </div>;
 }
 
-function AssistantPanel({ onClose }: { onClose: () => void }) {
+function AssistantPanel({ onClose, onDelegate }: { onClose: () => void; onDelegate: () => void }) {
   const [message, setMessage] = useState("");
   const [accepted, setAccepted] = useState(false);
+  const [mode, setMode] = useState<"chat" | "delegate">("chat");
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!message.trim()) return;
+    if (mode === "delegate") { onDelegate(); return; }
     setAccepted(true);
   };
   return <div className="assistant-layer" role="presentation" onMouseDown={onClose}>
     <section className="assistant-panel" role="dialog" aria-modal="true" aria-labelledby="assistant-title" onMouseDown={(event) => event.stopPropagation()}>
       <header className="assistant-head"><div className="assistant-identity"><span><Icon name="sparkle" /></span><div><strong id="assistant-title">Agent-OS</strong><small><i />隨時可以交付工作</small></div></div><button className="icon-only" onClick={onClose} aria-label="關閉助手"><Icon name="close" /></button></header>
       <div className="assistant-body">
-        {!accepted ? <><div className="assistant-welcome"><p>有什麼需要我處理的嗎？</p><span>可以交付任務，也可以只問一個簡單問題。</span></div><div className="prompt-chips"><button onClick={() => setMessage("幫我整理今天 Agent-OS 的執行狀態")}>整理今天的工作</button><button onClick={() => setMessage("持續追蹤 Agent-OS 的服務健康度")}>建立持續追蹤</button><button onClick={() => setMessage("明天早上八點提醒我檢查更新")}>安排提醒</button></div></> : <div className="accepted-task"><div className="accepted-icon"><Icon name="check" /></div><div><p className="eyebrow">Task accepted</p><h3>已接下這個任務</h3><p>我會先確認目標並自動放進任務清單。若需要授權或重要決定，我會再通知你。</p><div><span><i />正在建立任務</span><button>查看任務<Icon name="chevron" size={15} /></button><button className="undo" onClick={() => setAccepted(false)}>撤銷</button></div></div></div>}
+        <div className="assistant-mode-switch"><button className={mode === "chat" ? "active" : ""} onClick={() => { setMode("chat"); setAccepted(false); }}><Icon name="model" size={16} />聊天</button><button className={mode === "delegate" ? "active" : ""} onClick={() => { setMode("delegate"); setAccepted(false); }}><Icon name="sparkle" size={16} />交辦</button></div>
+        {!accepted ? <><div className="assistant-welcome"><p>{mode === "chat" ? "聊天模式" : "交辦模式"}</p><span>{mode === "chat" ? "模型對話會在 Phase 6 接入；目前不會假裝產生 AI 回答。" : "送出後會開啟 deterministic Goal 表單，由你明確設定 Outcome 與完成條件。"}</span></div>{mode === "delegate" && <div className="prompt-chips"><button type="button" onClick={() => setMessage("建立一個新的長期責任")}>建立長期 Goal</button><button type="button" onClick={() => setMessage("安排一件有截止時間的工作")}>設定截止工作</button></div>}</> : <div className="accepted-task"><div className="accepted-icon"><Icon name="model" /></div><div><p className="eyebrow">Chat runtime</p><h3>模型對話尚未啟用</h3><p>Phase 4 只接受結構化交辦，不會把文字假裝成已執行的 Agent 工作。請切換到「交辦」建立 Goal。</p><div><button onClick={() => { setMode("delegate"); setAccepted(false); }}>切換到交辦<Icon name="chevron" size={15} /></button></div></div></div>}
       </div>
-      <form className="assistant-compose" onSubmit={submit}><textarea value={message} onChange={(event) => { setMessage(event.target.value); setAccepted(false); }} placeholder="交付一件事，或問我任何問題…" rows={2} autoFocus /><div><span><Icon name="shield" size={15} />高風險操作會先詢問</span><button className="send-button" disabled={!message.trim()}><Icon name="arrow" /></button></div></form>
+      <form className="assistant-compose" onSubmit={submit}><textarea value={message} onChange={(event) => { setMessage(event.target.value); setAccepted(false); }} placeholder={mode === "chat" ? "聊天模式尚未接入模型…" : "描述你想交辦的責任…"} rows={2} autoFocus /><div><span><Icon name="shield" size={15} />{mode === "chat" ? "不會建立 Goal" : "會先開啟 Goal Contract 表單"}</span><button className="send-button" disabled={!message.trim()}><Icon name="arrow" /></button></div></form>
     </section>
   </div>;
 }
@@ -490,13 +497,15 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [mobileNav, setMobileNav] = useState(false);
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [snapshot, setSnapshot] = useState<{ system: SystemStatus; activity: ActivityItem[] }>();
+  const [portfolio, setPortfolio] = useState<PortfolioSnapshot>();
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [goals, setGoals] = useState<GoalRecord[]>([]);
   const [settings, setSettings] = useState<Settings>();
   const [openAI, setOpenAI] = useState<OpenAIConnection>();
   const [error, setError] = useState("");
-  const [briefingOpen, setBriefingOpen] = useState(true);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<DemoTask>();
-  const [notifications, setNotifications] = useState<NotificationItem[]>(demoNotifications);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [toast, setToast] = useState<NotificationItem>();
 
@@ -504,8 +513,25 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     try { setSnapshot(await client.dashboard()); setError(""); } catch (cause) { setError(messageFor(cause)); }
   };
 
+  const refreshResponsibilities = async () => {
+    try {
+      const [nextPortfolio, nextProjects, nextGoals] = await Promise.all([
+        client.portfolio(),
+        client.projects(),
+        client.goals(),
+      ]);
+      setPortfolio(nextPortfolio);
+      setProjects(nextProjects);
+      setGoals(nextGoals);
+      setError("");
+    } catch (cause) {
+      setError(messageFor(cause));
+    }
+  };
+
   useEffect(() => {
     void refresh();
+    void refreshResponsibilities();
     void client.settings().then(setSettings).catch((cause) => setError(messageFor(cause)));
     const stop = client.subscribe((event) => {
       if (event.type === "activity.created") setSnapshot((current) => current ? { ...current, activity: [event.data, ...current.activity].slice(0, 30) } : current);
@@ -516,6 +542,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
         setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
         setToast(event.data);
       }
+      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected"].includes(event.type)) void refreshResponsibilities();
     }, setConnection);
     return stop;
   }, []);
@@ -535,7 +562,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     ["records", "紀錄", "storage"], ["settings", "設定", "settings"],
   ] as Array<[View, string, IconName]>, []);
 
-  if (!snapshot || !settings) return <Loading />;
+  if (!snapshot || !settings || !portfolio) return <Loading />;
   const system = snapshot.system;
   const name = bootstrap.session.user?.displayName ?? "Owner";
   const pageTitles: Record<View, string> = { overview: "今日", tasks: "所有任務", records: "紀錄", system: "系統狀態", activity: "活動紀錄", settings: "設定" };
@@ -544,8 +571,8 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   return <div className="app-shell polished-shell">
     <aside className={mobileNav ? "sidebar open" : "sidebar"}>
       <div className="sidebar-head"><Logo /><button className="icon-only mobile-close" onClick={() => setMobileNav(false)}><Icon name="close" /></button></div>
-      <nav>{nav.map(([id, label, icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMobileNav(false); }}><Icon name={icon} />{label}{id === "overview" && <span className="nav-badge">4</span>}</button>)}</nav>
-      <button className="agent-status" onClick={() => setAssistantOpen(true)}><span className="agent-status-mark"><Icon name="sparkle" /></span><span><strong>Agent 正在工作</strong><small><i />4 個任務進行中</small></span><Icon name="chevron" size={16} /></button>
+      <nav>{nav.map(([id, label, icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMobileNav(false); }}><Icon name={icon} />{label}{id === "overview" && portfolio.waitingOnYou.length > 0 && <span className="nav-badge">{portfolio.waitingOnYou.length}</span>}</button>)}</nav>
+      <button className="agent-status" onClick={() => setView("tasks")}><span className="agent-status-mark"><Icon name="sparkle" /></span><span><strong>責任 Portfolio</strong><small><i />{goals.filter((goal) => !["COMPLETED", "CANCELLED"].includes(goal.status)).length} 個 Goal 進行中</small></span><Icon name="chevron" size={16} /></button>
       <div className="sidebar-user"><span className="avatar">{bootstrap.session.user?.initials ?? "AO"}</span><div><strong>{name}</strong><small>{settings.deviceName}</small></div><button className="icon-only" onClick={() => void onLogout()} aria-label="安全登出"><Icon name="logout" size={17} /></button></div>
     </aside>
     {mobileNav && <button className="scrim" aria-label="關閉選單" onClick={() => setMobileNav(false)} />}
@@ -553,8 +580,9 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       <header className="topbar"><button className="icon-only menu-button" onClick={() => setMobileNav(true)}><Icon name="menu" /></button><div className="topbar-title"><strong>{pageTitles[view]}</strong><small>Agent-OS・{settings.deviceName}</small></div><div className={`connection ${connection}`}><i />{connection === "online" ? "即時連線" : connection === "reconnecting" ? "重新連線" : "連線中"}</div><button className="notification-button" onClick={() => setNotificationOpen(true)} aria-label="開啟通知中心"><Icon name="warning" size={18} />{unreadCount > 0 && <span>{unreadCount}</span>}</button><span className="topbar-avatar avatar">{bootstrap.session.user?.initials ?? "AO"}</span></header>
       <main className={`content ${["overview", "tasks", "records"].includes(view) ? "workspace-content" : ""}`}>
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
-        {view === "overview" && <OverviewPage name={name} onOpenBriefing={() => setBriefingOpen(true)} onOpenTask={setSelectedTask} />}
-        {view === "tasks" && <TasksPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
+        {view === "records" && <div className="prototype-notice" role="note"><Icon name="warning" size={17} /><span><strong>Records UI 原型</strong>成果與對話仍是示範資料，會在後續 Runtime / Memory Phase 接入。</span></div>}
+        {view === "overview" && <SecretaryOverview name={name} snapshot={portfolio} projects={projects} client={client} onChanged={refreshResponsibilities} onChat={() => setAssistantOpen(true)} />}
+        {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} client={client} onChanged={refreshResponsibilities} />}
         {view === "records" && <RecordsPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}
@@ -562,8 +590,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       </main>
       <footer className="chat-dock assistant-dock"><button onClick={() => setAssistantOpen(true)}><span className="dock-agent"><Icon name="sparkle" /></span><span className="dock-placeholder">交付一件事，或問我任何問題…</span><kbd>⌘ K</kbd><span className="dock-send"><Icon name="arrow" /></span></button></footer>
     </div>
-    {briefingOpen && view === "overview" && <BriefingModal name={name} onClose={() => setBriefingOpen(false)} />}
-    {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} />}
+    {assistantOpen && <AssistantPanel onClose={() => setAssistantOpen(false)} onDelegate={() => { setAssistantOpen(false); setView("tasks"); }} />}
     {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(undefined)} />}
     {notificationOpen && <NotificationCenter items={notifications} onClose={() => setNotificationOpen(false)} onRead={(id) => setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item))} onReadAll={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} onOpenTask={(task) => { setNotificationOpen(false); setSelectedTask(task); }} />}
     {toast && <NotificationToast item={toast} onClose={() => setToast(undefined)} onOpen={() => { const task = demoTasks.find((item) => item.id === toast.taskId); if (task) setSelectedTask(task); setToast(undefined); }} />}

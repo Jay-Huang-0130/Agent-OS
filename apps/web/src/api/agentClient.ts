@@ -1,11 +1,19 @@
 import type {
   ActivityItem,
+  ApprovalRecord,
   AgentEvent,
   BootstrapResponse,
   ConnectionState,
+  CommitmentOwner,
+  CommitmentRecord,
+  CreateGoalInput,
+  GoalRecord,
   MetaResponse,
   OpenAIConnection,
   OpenAIDeviceLogin,
+  PortfolioSnapshot,
+  ProjectDetail,
+  ProjectRecord,
   SessionResponse,
   Settings,
   SetupInput,
@@ -73,6 +81,76 @@ export class AgentClient {
       this.request<ActivityItem[]>("/api/v1/activity"),
     ]);
     return { system, activity };
+  }
+
+  portfolio(): Promise<PortfolioSnapshot> {
+    return this.request<PortfolioSnapshot>("/api/v1/portfolio");
+  }
+
+  projects(): Promise<ProjectRecord[]> {
+    return this.request<ProjectRecord[]>("/api/v1/projects");
+  }
+
+  goals(): Promise<GoalRecord[]> {
+    return this.request<GoalRecord[]>("/api/v1/goals");
+  }
+
+  createProject(input: { name: string; description?: string }): Promise<ProjectRecord> {
+    return this.request<ProjectRecord>("/api/v1/projects", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(input),
+    }, true);
+  }
+
+  createGoal(input: CreateGoalInput): Promise<GoalRecord> {
+    return this.request<GoalRecord>("/api/v1/goals", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(input),
+    }, true);
+  }
+
+  projectDetail(id: string): Promise<ProjectDetail> {
+    return this.request<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(id)}`);
+  }
+
+  goalAction(id: string, action: "pause" | "resume" | "cancel", reason?: string): Promise<GoalRecord> {
+    return this.request<GoalRecord>(`/api/v1/goals/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(reason ? { reason } : {}),
+    }, true);
+  }
+
+  createCommitment(input: {
+    goalId: string;
+    owner: CommitmentOwner;
+    owedTo: CommitmentOwner;
+    promise: string;
+    dueAt?: string;
+    followUpPolicy?: "remind_at_due" | "remind_24h_before";
+  }): Promise<CommitmentRecord> {
+    return this.request<CommitmentRecord>("/api/v1/commitments", {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify(input),
+    }, true);
+  }
+
+  commitmentAction(id: string, action: "fulfill" | "cancel"): Promise<CommitmentRecord> {
+    return this.request<CommitmentRecord>(`/api/v1/commitments/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      headers: { "Idempotency-Key": crypto.randomUUID() },
+      body: JSON.stringify({}),
+    }, true);
+  }
+
+  decideApproval(id: string, decision: "APPROVED" | "REJECTED", reason: string): Promise<ApprovalRecord> {
+    return this.request<ApprovalRecord>(`/api/v1/approvals/${encodeURIComponent(id)}/decision`, {
+      method: "POST",
+      body: JSON.stringify({ decision, reason }),
+    }, true);
   }
 
   settings(): Promise<Settings> {

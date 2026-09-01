@@ -65,4 +65,32 @@ describe("AgentClient", () => {
     expect(init.body).toBeUndefined();
     expect(new Headers(init.headers).get("x-csrf-token")).toBe("csrf-test");
   });
+
+  it("creates durable Goals with CSRF and an idempotency key", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: "Agent-OS", version: "0.1.0", setupRequired: false, secure: true, hostname: "pi",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true, csrfToken: "csrf-phase-4", user: { id: "owner", displayName: "Owner", initials: "OW" },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "goal-1", status: "ACTIVE" }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentClient();
+    await client.bootstrap();
+
+    await client.createGoal({
+      title: "Phase 4 Goal",
+      desiredOutcome: "A real Secretary Portfolio",
+      completionCriteria: ["Portfolio is connected to SQLite"],
+      autonomy: "PREPARE",
+    });
+
+    const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(path).toBe("/api/v1/goals");
+    expect(init.method).toBe("POST");
+    expect(headers.get("x-csrf-token")).toBe("csrf-phase-4");
+    expect(headers.get("idempotency-key")).toBeTruthy();
+  });
 });

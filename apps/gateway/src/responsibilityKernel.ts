@@ -58,6 +58,7 @@ export interface GoalContract {
   completionCriteria: string[];
   cancellationCriteria: string[];
   externalDependencies: string[];
+  deadline: string | null;
   constraints: Record<string, unknown>;
   priority: Record<string, unknown>;
   attentionPolicy: Record<string, unknown>;
@@ -161,11 +162,83 @@ export interface CreateGoalInput {
   completionCriteria: string[];
   cancellationCriteria?: string[] | undefined;
   externalDependencies?: string[] | undefined;
+  deadline?: string | undefined;
   constraints?: Record<string, unknown> | undefined;
   priority?: Record<string, unknown> | undefined;
   attentionPolicy?: Record<string, unknown> | undefined;
   budget?: Record<string, unknown> | undefined;
   autonomy?: AutonomyLevel | undefined;
+}
+
+export const commitmentOwners = ["USER", "AGENT_OS", "EXTERNAL_PARTY"] as const;
+export const commitmentStatuses = ["OPEN", "WAITING", "FULFILLED", "BROKEN", "CANCELLED"] as const;
+export type CommitmentOwner = typeof commitmentOwners[number];
+export type CommitmentStatus = typeof commitmentStatuses[number];
+
+export interface CommitmentRecord {
+  id: string;
+  goalId: string;
+  owner: CommitmentOwner;
+  owedTo: CommitmentOwner;
+  promise: string;
+  dueAt: string | null;
+  status: CommitmentStatus;
+  followUpPolicy: string | null;
+  evidenceRefs: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCommitmentInput {
+  goalId: string;
+  owner: CommitmentOwner;
+  owedTo: CommitmentOwner;
+  promise: string;
+  dueAt?: string | undefined;
+  followUpPolicy?: string | undefined;
+}
+
+export interface ProjectDetail {
+  project: ProjectRecord;
+  goals: GoalRecord[];
+  commitments: CommitmentRecord[];
+  timeline: EventRecord[];
+  artifacts: Array<{
+    id: string;
+    goalId: string | null;
+    taskId: string | null;
+    kind: string;
+    uri: string;
+    sha256: string | null;
+    metadata: Record<string, unknown>;
+    createdAt: string;
+  }>;
+}
+
+export interface PortfolioSnapshot {
+  generatedAt: string;
+  today: GoalRecord[];
+  waitingOnYou: GoalRecord[];
+  waitingOnOthers: GoalRecord[];
+  upcoming: GoalRecord[];
+  activeProjects: Array<ProjectRecord & { activeGoalCount: number; openCommitmentCount: number }>;
+  needsDecision: GoalRecord[];
+  recentlyCompleted: GoalRecord[];
+  commitments: CommitmentRecord[];
+  approvals: ApprovalRecord[];
+}
+
+export interface ApprovalRecord {
+  id: string;
+  goalId: string;
+  taskId: string | null;
+  action: Record<string, unknown>;
+  risk: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CANCELLED";
+  requestedAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  decisionReason: string | null;
 }
 
 export class KernelError extends Error {
@@ -253,18 +326,29 @@ function projectFromRow(row: Record<string, unknown>): ProjectRecord {
 }
 
 function contractFromJson(value: unknown): GoalContract {
-  return parseJson<GoalContract>(value, {
+  const fallback: GoalContract = {
     desiredOutcome: "",
     agentCommitment: [],
     completionCriteria: [],
     cancellationCriteria: [],
     externalDependencies: [],
+    deadline: null,
     constraints: {},
     priority: {},
     attentionPolicy: {},
     budget: {},
     autonomy: "ASK_BEFORE_ACT",
-  });
+  };
+  const parsed = parseJson<Partial<GoalContract>>(value, {});
+  return {
+    ...fallback,
+    ...parsed,
+    deadline: typeof parsed.deadline === "string" ? parsed.deadline : null,
+    agentCommitment: Array.isArray(parsed.agentCommitment) ? parsed.agentCommitment : [],
+    completionCriteria: Array.isArray(parsed.completionCriteria) ? parsed.completionCriteria : [],
+    cancellationCriteria: Array.isArray(parsed.cancellationCriteria) ? parsed.cancellationCriteria : [],
+    externalDependencies: Array.isArray(parsed.externalDependencies) ? parsed.externalDependencies : [],
+  };
 }
 
 function goalFromRow(row: Record<string, unknown>): GoalRecord {
@@ -328,6 +412,52 @@ function leaseFromRow(row: Record<string, unknown>): LeaseRecord {
     renewedAt: asString(row.renewed_at),
     expiresAt: asString(row.expires_at),
   };
+}
+
+function commitmentFromRow(row: Record<string, unknown>): CommitmentRecord {
+  return {
+    id: asString(row.id),
+    goalId: asString(row.goal_id),
+    owner: asString(row.owner) as CommitmentOwner,
+    owedTo: asString(row.owed_to) as CommitmentOwner,
+    promise: asString(row.promise),
+    dueAt: nullableString(row.due_at),
+    status: asString(row.status) as CommitmentStatus,
+    followUpPolicy: nullableString(row.follow_up_policy),
+    evidenceRefs: parseJson<string[]>(row.evidence_refs_json, []),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
+}
+
+function approvalFromRow(row: Record<string, unknown>): ApprovalRecord {
+  return {
+    id: asString(row.id),
+    goalId: asString(row.goal_id),
+    taskId: nullableString(row.task_id),
+    action: parseJson<Record<string, unknown>>(row.action_json, {}),
+    risk: asString(row.risk),
+    status: asString(row.status) as ApprovalRecord["status"],
+    requestedAt: asString(row.requested_at),
+    decidedAt: nullableString(row.decided_at),
+    decidedBy: nullableString(row.decided_by),
+    decisionReason: nullableString(row.decision_reason),
+  };
+}
+
+function dateKey(date: Date, timezone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
 }
 
 export class ResponsibilityKernel {
@@ -505,6 +635,7 @@ export class ResponsibilityKernel {
       completionCriteria: string[];
       cancellationCriteria: string[];
       externalDependencies: string[];
+      deadline: string | null;
       constraints: Record<string, unknown>;
       priority: Record<string, unknown>;
       attentionPolicy: Record<string, unknown>;
@@ -518,6 +649,7 @@ export class ResponsibilityKernel {
       completionCriteria: input.completionCriteria,
       cancellationCriteria: input.cancellationCriteria ?? [],
       externalDependencies: input.externalDependencies ?? [],
+      deadline: input.deadline ?? null,
       constraints: input.constraints ?? {},
       priority: input.priority ?? {},
       attentionPolicy: input.attentionPolicy ?? {},
@@ -537,6 +669,7 @@ export class ResponsibilityKernel {
         completionCriteria: normalized.completionCriteria,
         cancellationCriteria: normalized.cancellationCriteria,
         externalDependencies: normalized.externalDependencies,
+        deadline: normalized.deadline,
         constraints: normalized.constraints,
         priority: normalized.priority,
         attentionPolicy: normalized.attentionPolicy,
@@ -679,6 +812,44 @@ export class ResponsibilityKernel {
     return this.transitionGoal(id, ownerUserId, "COMPLETED", "goal.completed", reason, undefined, evidenceRefs);
   }
 
+  blockGoal(id: string, ownerUserId: string, reason: string, idempotencyKey?: string): GoalRecord {
+    return this.transitionGoal(id, ownerUserId, "BLOCKED", "goal.blocked", reason, idempotencyKey);
+  }
+
+  recordGoalProgress(
+    id: string,
+    ownerUserId: string,
+    detail: string,
+    progress?: number,
+    idempotencyKey?: string,
+  ): GoalRecord {
+    const normalizedProgress = progress === undefined ? undefined : Math.max(0, Math.min(100, progress));
+    const hash = requestHash({ id, detail, progress: normalizedProgress });
+    return this.transaction(() => {
+      const scope = `goal:progress:${id}`;
+      const replayId = this.assertIdempotency(scope, idempotencyKey, hash);
+      if (replayId) return this.requireGoal(replayId, ownerUserId);
+      const goal = this.requireGoal(id, ownerUserId);
+      if (["COMPLETED", "CANCELLED"].includes(goal.status)) {
+        throw new KernelError("invalid_transition", `A terminal Goal cannot record progress from ${goal.status}.`);
+      }
+      const now = new Date().toISOString();
+      this.db.prepare("UPDATE goals SET updated_at = ? WHERE id = ?").run(now, id);
+      this.appendEvent({
+        projectId: goal.projectId,
+        goalId: id,
+        aggregateType: "goal",
+        aggregateId: id,
+        type: "goal.progressed",
+        data: { detail, ...(normalizedProgress === undefined ? {} : { progress: normalizedProgress }) },
+        actor: ownerUserId,
+        occurredAt: now,
+      });
+      this.rememberIdempotency(scope, idempotencyKey, hash, "goal", id, now);
+      return this.requireGoal(id, ownerUserId);
+    });
+  }
+
   listGoalEvents(id: string, ownerUserId: string, limit = 100): EventRecord[] {
     this.requireGoal(id, ownerUserId);
     const safeLimit = Math.max(1, Math.min(500, limit));
@@ -704,6 +875,337 @@ export class ResponsibilityKernel {
       createdAt: asString(row.created_at),
       consumedAt: nullableString(row.consumed_at),
     }));
+  }
+
+  createCommitment(
+    ownerUserId: string,
+    input: CreateCommitmentInput,
+    idempotencyKey?: string,
+  ): CommitmentRecord {
+    const normalized = {
+      ...input,
+      dueAt: input.dueAt ?? null,
+      followUpPolicy: input.followUpPolicy ?? (input.dueAt ? "remind_24h_before" : null),
+    };
+    const hash = requestHash(normalized);
+    return this.transaction(() => {
+      const scope = `commitment:create:${ownerUserId}`;
+      const replayId = this.assertIdempotency(scope, idempotencyKey, hash);
+      if (replayId) return this.requireCommitment(replayId, ownerUserId);
+      const goal = this.requireGoal(input.goalId, ownerUserId);
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      this.db.prepare(`INSERT INTO commitments
+        (id, goal_id, owner, owed_to, promise, due_at, status, follow_up_policy,
+         evidence_refs_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, '[]', ?, ?)`)
+        .run(
+          id,
+          input.goalId,
+          input.owner,
+          input.owedTo,
+          input.promise,
+          normalized.dueAt,
+          normalized.followUpPolicy,
+          now,
+          now,
+        );
+      if (normalized.dueAt) {
+        const dueAtMs = new Date(normalized.dueAt).getTime();
+        const remindAt = normalized.followUpPolicy === "remind_24h_before"
+          ? new Date(dueAtMs - 24 * 60 * 60_000)
+          : new Date(dueAtMs);
+        this.db.prepare(`INSERT INTO wake_conditions
+          (id, goal_id, task_id, type, status, due_at, payload_json, misfire_policy,
+           idempotency_key, created_at)
+          VALUES (?, ?, NULL, 'TIME', 'PENDING', ?, ?, 'RUN_ONCE_NOW', ?, ?)`)
+          .run(
+            randomUUID(),
+            input.goalId,
+            remindAt.toISOString(),
+            JSON.stringify({ event: "commitment.reminder_due", commitmentId: id }),
+            `commitment:${id}:reminder`,
+            now,
+          );
+      }
+      this.appendEvent({
+        projectId: goal.projectId,
+        goalId: goal.id,
+        aggregateType: "commitment",
+        aggregateId: id,
+        type: normalized.dueAt ? "commitment.reminder_scheduled" : "commitment.created",
+        data: {
+          owner: input.owner,
+          owedTo: input.owedTo,
+          promise: input.promise,
+          dueAt: normalized.dueAt,
+          followUpPolicy: normalized.followUpPolicy,
+        },
+        actor: ownerUserId,
+        occurredAt: now,
+      });
+      this.rememberIdempotency(scope, idempotencyKey, hash, "commitment", id, now);
+      return this.requireCommitment(id, ownerUserId);
+    });
+  }
+
+  private requireCommitment(id: string, ownerUserId: string): CommitmentRecord {
+    const row = this.db.prepare(`SELECT c.* FROM commitments c
+      JOIN goals g ON g.id = c.goal_id
+      WHERE c.id = ? AND g.owner_user_id = ?`).get(id, ownerUserId) as Record<string, unknown> | undefined;
+    if (!row) throw new KernelError("not_found", "Commitment not found.");
+    return commitmentFromRow(row);
+  }
+
+  listCommitments(
+    ownerUserId: string,
+    filters: { goalId?: string | undefined; projectId?: string | undefined; status?: CommitmentStatus | undefined } = {},
+  ): CommitmentRecord[] {
+    const clauses = ["g.owner_user_id = ?"];
+    const values = [ownerUserId];
+    if (filters.goalId) {
+      clauses.push("c.goal_id = ?");
+      values.push(filters.goalId);
+    }
+    if (filters.projectId) {
+      clauses.push("g.project_id = ?");
+      values.push(filters.projectId);
+    }
+    if (filters.status) {
+      clauses.push("c.status = ?");
+      values.push(filters.status);
+    }
+    const rows = this.db.prepare(`SELECT c.* FROM commitments c
+      JOIN goals g ON g.id = c.goal_id
+      WHERE ${clauses.join(" AND ")}
+      ORDER BY CASE WHEN c.due_at IS NULL THEN 1 ELSE 0 END, c.due_at, c.created_at DESC`)
+      .all(...values) as Array<Record<string, unknown>>;
+    return rows.map(commitmentFromRow);
+  }
+
+  transitionCommitment(
+    id: string,
+    ownerUserId: string,
+    target: "FULFILLED" | "CANCELLED",
+    evidenceRefs: string[] = [],
+    idempotencyKey?: string,
+  ): CommitmentRecord {
+    const hash = requestHash({ id, target, evidenceRefs });
+    return this.transaction(() => {
+      const scope = `commitment:${target.toLowerCase()}:${id}`;
+      const replayId = this.assertIdempotency(scope, idempotencyKey, hash);
+      if (replayId) return this.requireCommitment(replayId, ownerUserId);
+      const current = this.requireCommitment(id, ownerUserId);
+      if (!["OPEN", "WAITING", "BROKEN"].includes(current.status)) {
+        throw new KernelError("invalid_transition", `Commitment cannot transition from ${current.status} to ${target}.`);
+      }
+      const goal = this.requireGoal(current.goalId, ownerUserId);
+      const now = new Date().toISOString();
+      this.db.prepare(`UPDATE commitments SET status = ?, evidence_refs_json = ?, updated_at = ? WHERE id = ?`)
+        .run(target, JSON.stringify(evidenceRefs), now, id);
+      this.db.prepare(`UPDATE wake_conditions SET status = 'CANCELLED'
+        WHERE goal_id = ? AND idempotency_key = ? AND status IN ('PENDING', 'CLAIMED')`)
+        .run(current.goalId, `commitment:${id}:reminder`);
+      this.appendEvent({
+        projectId: goal.projectId,
+        goalId: goal.id,
+        aggregateType: "commitment",
+        aggregateId: id,
+        type: target === "FULFILLED" ? "commitment.fulfilled" : "commitment.cancelled",
+        data: { from: current.status, to: target, evidenceRefs },
+        actor: ownerUserId,
+        occurredAt: now,
+      });
+      this.rememberIdempotency(scope, idempotencyKey, hash, "commitment", id, now);
+      return this.requireCommitment(id, ownerUserId);
+    });
+  }
+
+  getProjectDetail(id: string, ownerUserId: string): ProjectDetail {
+    const project = this.requireProject(id, ownerUserId);
+    const goals = this.listGoals(ownerUserId, { projectId: id });
+    const commitments = this.listCommitments(ownerUserId, { projectId: id });
+    const timelineRows = this.db.prepare(`SELECT * FROM events WHERE project_id = ?
+      ORDER BY occurred_at DESC, sequence DESC LIMIT 300`).all(id) as Array<Record<string, unknown>>;
+    const artifactRows = this.db.prepare(`SELECT * FROM artifact_refs WHERE project_id = ?
+      OR goal_id IN (SELECT id FROM goals WHERE project_id = ?) ORDER BY created_at DESC`)
+      .all(id, id) as Array<Record<string, unknown>>;
+    return {
+      project,
+      goals,
+      commitments,
+      timeline: timelineRows.map(eventFromRow),
+      artifacts: artifactRows.map((row) => ({
+        id: asString(row.id),
+        goalId: nullableString(row.goal_id),
+        taskId: nullableString(row.task_id),
+        kind: asString(row.kind),
+        uri: asString(row.uri),
+        sha256: nullableString(row.sha256),
+        metadata: parseJson<Record<string, unknown>>(row.metadata_json, {}),
+        createdAt: asString(row.created_at),
+      })),
+    };
+  }
+
+  requestApproval(
+    ownerUserId: string,
+    input: { goalId: string; taskId?: string | undefined; action: Record<string, unknown>; risk: string },
+    actor = "kernel:decision-gate",
+  ): ApprovalRecord {
+    return this.transaction(() => {
+      const goal = this.requireGoal(input.goalId, ownerUserId);
+      if (!["ACTIVE", "RETRYING", "WAITING"].includes(goal.status)) {
+        throw new KernelError("invalid_transition", `Goal cannot request approval from ${goal.status}.`);
+      }
+      const now = new Date().toISOString();
+      const id = randomUUID();
+      this.db.prepare(`INSERT INTO approvals
+        (id, goal_id, task_id, action_json, risk, status, requested_at)
+        VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`)
+        .run(id, input.goalId, input.taskId ?? null, JSON.stringify(input.action), input.risk, now);
+      this.db.prepare(`UPDATE goals SET status = 'NEEDS_APPROVAL', state_reason = ?, updated_at = ? WHERE id = ?`)
+        .run(`Approval ${id} is waiting for the owner.`, now, input.goalId);
+      this.appendEvent({
+        projectId: goal.projectId,
+        goalId: goal.id,
+        aggregateType: "approval",
+        aggregateId: id,
+        type: "approval.requested",
+        data: { action: input.action, risk: input.risk, from: goal.status, to: "NEEDS_APPROVAL" },
+        actor,
+        occurredAt: now,
+      });
+      return this.requireApproval(id, ownerUserId);
+    });
+  }
+
+  private requireApproval(id: string, ownerUserId: string): ApprovalRecord {
+    const row = this.db.prepare(`SELECT a.* FROM approvals a JOIN goals g ON g.id = a.goal_id
+      WHERE a.id = ? AND g.owner_user_id = ?`).get(id, ownerUserId) as Record<string, unknown> | undefined;
+    if (!row) throw new KernelError("not_found", "Approval not found.");
+    return approvalFromRow(row);
+  }
+
+  listApprovals(ownerUserId: string, status?: ApprovalRecord["status"]): ApprovalRecord[] {
+    const rows = this.db.prepare(`SELECT a.* FROM approvals a JOIN goals g ON g.id = a.goal_id
+      WHERE g.owner_user_id = ? AND (? IS NULL OR a.status = ?)
+      ORDER BY a.requested_at DESC`).all(ownerUserId, status ?? null, status ?? null) as Array<Record<string, unknown>>;
+    return rows.map(approvalFromRow);
+  }
+
+  decideApproval(
+    id: string,
+    ownerUserId: string,
+    decision: "APPROVED" | "REJECTED",
+    reason: string,
+  ): ApprovalRecord {
+    return this.transaction(() => {
+      const approval = this.requireApproval(id, ownerUserId);
+      if (approval.status !== "PENDING") {
+        throw new KernelError("invalid_transition", `Approval has already reached ${approval.status}.`);
+      }
+      const goal = this.requireGoal(approval.goalId, ownerUserId);
+      const now = new Date().toISOString();
+      this.db.prepare(`UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, decision_reason = ? WHERE id = ?`)
+        .run(decision, now, ownerUserId, reason, id);
+      if (goal.status === "NEEDS_APPROVAL") {
+        this.db.prepare(`UPDATE goals SET status = 'ACTIVE', state_reason = NULL, updated_at = ? WHERE id = ?`)
+          .run(now, goal.id);
+      }
+      if (decision === "APPROVED") {
+        this.db.prepare(`INSERT INTO wake_conditions
+          (id, goal_id, task_id, type, status, due_at, payload_json, misfire_policy, idempotency_key, created_at)
+          VALUES (?, ?, ?, 'APPROVAL_GRANTED', 'PENDING', ?, ?, 'RUN_ONCE_NOW', ?, ?)`)
+          .run(
+            randomUUID(),
+            goal.id,
+            approval.taskId,
+            now,
+            JSON.stringify({ approvalId: id }),
+            `approval:${id}:granted`,
+            now,
+          );
+      }
+      this.appendEvent({
+        projectId: goal.projectId,
+        goalId: goal.id,
+        aggregateType: "approval",
+        aggregateId: id,
+        type: decision === "APPROVED" ? "approval.approved" : "approval.rejected",
+        data: { reason, goalStatus: "ACTIVE" },
+        actor: ownerUserId,
+        occurredAt: now,
+      });
+      return this.requireApproval(id, ownerUserId);
+    });
+  }
+
+  portfolio(ownerUserId: string, timezone: string, now = new Date()): PortfolioSnapshot {
+    const goals = this.listGoals(ownerUserId);
+    const projects = this.listProjects(ownerUserId);
+    const commitments = this.listCommitments(ownerUserId);
+    const pendingApprovals = this.listApprovals(ownerUserId, "PENDING");
+    const approvalGoalIds = new Set(pendingApprovals.map((approval) => approval.goalId));
+    const todayKey = dateKey(now, timezone);
+    const terminal = new Set<GoalStatus>(["COMPLETED", "CANCELLED"]);
+    const active = goals.filter((goal) => !terminal.has(goal.status));
+    const deadlineFor = (goal: GoalRecord): string | null => {
+      if (goal.contract.deadline) return goal.contract.deadline;
+      const value = goal.contract.priority.deadline;
+      return typeof value === "string" ? value : null;
+    };
+    const isHighPriority = (goal: GoalRecord): boolean => {
+      const urgency = goal.contract.priority.urgency;
+      const rank = goal.contract.priority.userRank;
+      return urgency === "high" || (typeof rank === "number" && rank <= 2);
+    };
+    const commitmentGoalIds = (owner: CommitmentOwner) => new Set(
+      commitments
+        .filter((item) => item.owner === owner && ["OPEN", "WAITING", "BROKEN"].includes(item.status))
+        .map((item) => item.goalId),
+    );
+    const userCommitmentGoals = commitmentGoalIds("USER");
+    const externalCommitmentGoals = commitmentGoalIds("EXTERNAL_PARTY");
+    const waitingYouStatuses = new Set<GoalStatus>(["CLARIFYING", "WAITING_AUTH", "NEEDS_APPROVAL"]);
+    const waitingOthersStatuses = new Set<GoalStatus>(["WAITING"]);
+    const sortByDeadline = (left: GoalRecord, right: GoalRecord) => {
+      const a = deadlineFor(left) ?? "9999";
+      const b = deadlineFor(right) ?? "9999";
+      return a.localeCompare(b) || right.updatedAt.localeCompare(left.updatedAt);
+    };
+    const today = active.filter((goal) => {
+      if (!["ACTIVE", "RETRYING"].includes(goal.status)) return false;
+      const deadline = deadlineFor(goal);
+      return isHighPriority(goal) || Boolean(deadline && dateKey(new Date(deadline), timezone) <= todayKey);
+    }).sort(sortByDeadline);
+    const upcoming = active.filter((goal) => {
+      const deadline = deadlineFor(goal);
+      return Boolean(deadline && dateKey(new Date(deadline as string), timezone) > todayKey);
+    }).sort(sortByDeadline);
+    const waitingOnYou = active.filter((goal) => waitingYouStatuses.has(goal.status) || userCommitmentGoals.has(goal.id));
+    const waitingOnOthers = active.filter(
+      (goal) => waitingOthersStatuses.has(goal.status) || externalCommitmentGoals.has(goal.id),
+    );
+    const activeProjects = projects.filter((project) => project.status === "ACTIVE").map((project) => ({
+      ...project,
+      activeGoalCount: active.filter((goal) => goal.projectId === project.id).length,
+      openCommitmentCount: commitments.filter((item) =>
+        ["OPEN", "WAITING", "BROKEN"].includes(item.status)
+        && goals.some((goal) => goal.id === item.goalId && goal.projectId === project.id)).length,
+    })).filter((project) => project.activeGoalCount > 0 || project.openCommitmentCount > 0);
+    return {
+      generatedAt: now.toISOString(),
+      today,
+      waitingOnYou,
+      waitingOnOthers,
+      upcoming,
+      activeProjects,
+      needsDecision: active.filter((goal) => goal.status === "NEEDS_APPROVAL" || approvalGoalIds.has(goal.id)),
+      recentlyCompleted: goals.filter((goal) => goal.status === "COMPLETED").slice(0, 10),
+      commitments,
+      approvals: pendingApprovals,
+    };
   }
 
   createTask(input: {

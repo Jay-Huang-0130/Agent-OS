@@ -5,9 +5,9 @@
 
 Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接受委託、持續工作、使用不同裝置能力，並對結果負責的私人 AI 作業層。
 
-專案目前已完成 Phase 0–3：可攜式基礎架構、隔離式安裝器、Gateway/Web 管理介面，以及可跨重啟保存 Project、Goal、Task、Event、Wake、Lease 與 Outbox 的 Durable Responsibility Store。OpenAI 官方 Codex app-server／ChatGPT OAuth 連線也已就緒；Secretary Portfolio、背景 Wake Worker 與模型執行層會在後續 Phase 接入。
+專案目前已完成 Phase 0–4：可攜式基礎架構、Durable Responsibility Store，以及直接讀取真實 Project、Goal、Commitment、Approval 與 Event 的 Secretary Portfolio。OpenAI 官方 Codex app-server／ChatGPT OAuth 連線也已就緒；背景 Wake Worker 與模型執行層會在後續 Phase 接入。
 
-## Phase 0–3 已完成
+## Phase 0–4 已完成
 
 - Agent-OS 自帶固定版本的 Node.js 24 LTS，不安裝系統 Node、不執行全域 `npm install`。
 - 正式支援 64-bit Raspberry Pi OS／Debian／Ubuntu 的 ARM64 與 x64。
@@ -17,6 +17,8 @@ Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接�
 - Agent Web 是選用的瀏覽器能力，不是 Phase 2 的必要依賴。
 - Responsibility Kernel 以版本化 migration 管理 Project、Goal、Task、Run、Event、Wake、Lease、Outbox、Approval 與 Artifact reference。
 - Goal 接受、版本、首個 Wake、Event 與 Outbox intent 以單一 transaction 提交；支援 idempotent retry、狀態機與啟動 recovery。
+- Secretary UI 提供 Today、Waiting、Upcoming、Active Projects、Decision Queue、Commitment Ledger 與 Project Detail。
+- Project／Goal 建立和控制、Priority、Deadline、Autonomy、Attention Policy 與 Approval decision 都使用 durable API，不使用前端假資料。
 
 完整說明與開發流程請見 [Phase 0–2 實作說明](docs/PHASE-0-2.md)。
 
@@ -195,18 +197,18 @@ bash ./install.sh --force-agent-web-update
 - [VISION.md](VISION.md)：Agent-OS 的完整產品願景。
 - [Phase 0–2 實作說明](docs/PHASE-0-2.md)：支援平台、隔離方式、API、安全與安裝流程。
 - [Phase 3 Durable Responsibility Store](docs/PHASE-3.md)：資料模型、狀態機、Event/Outbox、Lease、recovery、idempotency 與 Goal API。
+- [Phase 4 Secretary Portfolio MVP](docs/PHASE-4.md)：Portfolio projection、Commitment、Approval、Project Detail 與真實 Web UI。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
 - [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、headless 裝置代碼登入、隔離與 API。
 
 ## 專案狀態
 
-目前版本建立的是可以實際執行的 foundation 與 durable responsibility kernel，不代表完整 Agent-OS 已完成。Phase 3 會以 transaction 原子接受 Goal、保存版本化 Goal Contract、寫入 append-only Event、建立 first Wake 與 Outbox intent；同時提供狀態機、idempotency、lease 與啟動復原。OpenAI 登入使用適合樹莓派與遠端伺服器的 ChatGPT device-code 流程，OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
+目前版本建立的是可以實際執行的 durable responsibility kernel 與 Secretary Portfolio，不代表背景 Agent Runtime 已完成。Phase 3 以 transaction 原子接受 Goal，並提供狀態機、idempotency、lease 與啟動復原；Phase 4 將 Project、Goal、Commitment、Approval 與 Event 投影成可操作的 Today、Waiting、Decision Queue 和 Project Detail。OpenAI 登入使用適合樹莓派與遠端伺服器的 ChatGPT device-code 流程，OAuth 權杖由官方 Codex 管理並保存在 Agent-OS 私有 state 目錄，不會送到瀏覽器。
 
 後續建議依序實作：
 
-1. Secretary Portfolio 與 Commitment views（Phase 4）。
-2. Wake Engine、背景 Worker 與 deterministic Capability runner（Phase 5）。
-3. Agent Runtime、Goal Compiler 與模型抽象層（Phase 6）。
-4. Watcher 與 Agent Web protected Adapter。
-5. Approval、Audit、Memory 與 Human Takeover。
-6. Device identity 與 Personal Device Mesh。
+1. Wake Engine、背景 Worker 與 deterministic Capability runner（Phase 5）。
+2. Agent Runtime、Goal Compiler 與模型抽象層（Phase 6）。
+3. Watcher 與 Agent Web protected Adapter。
+4. Memory、Artifact workflow 與 Human Takeover。
+5. Device identity 與 Personal Device Mesh。

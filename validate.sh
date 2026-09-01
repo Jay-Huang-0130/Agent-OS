@@ -23,6 +23,7 @@ required_files=(
     apps/web/package.json
     apps/web/src/main.tsx
     apps/web/src/App.tsx
+    apps/web/src/SecretaryPortfolio.tsx
     scripts/install-agent-web.sh
     scripts/install-node-runtime.sh
     scripts/generate-tls.sh
@@ -31,6 +32,7 @@ required_files=(
     docs/AGENT-WEB-INTEGRATION.md
     docs/OPENAI-OAUTH.md
     docs/PHASE-3.md
+    docs/PHASE-4.md
     docs/PHASE.md
     docs/RESPONSIBILITY-KERNEL.md
 )
@@ -65,6 +67,8 @@ fi
 grep -q '/api/v1/setup/complete' apps/gateway/src/app.ts
 grep -q '/api/v1/events' apps/gateway/src/app.ts
 grep -q '/api/v1/goals' apps/gateway/src/app.ts
+grep -q '/api/v1/portfolio' apps/gateway/src/app.ts
+grep -q '/api/v1/commitments' apps/gateway/src/app.ts
 grep -q 'CREATE TABLE IF NOT EXISTS outbox' apps/gateway/src/database.ts
 
 if grep -R -n -E --include='*.sh' --exclude-dir=node_modules --exclude-dir=.git -- '--password[ =][^f]' .; then
@@ -76,4 +80,4 @@ if command -v npm >/dev/null 2>&1 && [[ -d node_modules ]]; then
     npm run typecheck
 fi
 
-echo "Agent-OS Phase 0-3 validation passed."
+echo "Agent-OS Phase 0-4 validation passed."

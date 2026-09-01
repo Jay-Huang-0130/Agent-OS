@@ -306,3 +306,97 @@ test("owner can create and control durable Projects and Goals", async () => {
     "goal.cancelled",
   ]);
 });
+
+test("Phase 4 API exposes commitments, portfolio projection and Project detail", async () => {
+  const { app, config } = await fixture();
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({
+    method: "POST",
+    url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" },
+  });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const writeHeaders = { cookie, "x-csrf-token": session.json().csrfToken as string };
+  const projectResponse = await app.inject({
+    method: "POST",
+    url: "/api/v1/projects",
+    headers: writeHeaders,
+    payload: { name: "Phase 4" },
+  });
+  const projectId = projectResponse.json().id as string;
+  const goalResponse = await app.inject({
+    method: "POST",
+    url: "/api/v1/goals",
+    headers: writeHeaders,
+    payload: {
+      projectId,
+      title: "Ship the Secretary Portfolio",
+      desiredOutcome: "The owner sees real durable responsibilities.",
+      completionCriteria: ["Portfolio acceptance tests pass."],
+      deadline: "2026-09-05T18:00:00+08:00",
+      priority: { urgency: "high", userRank: 1 },
+      autonomy: "PREPARE",
+    },
+  });
+  assert.equal(goalResponse.statusCode, 201);
+  assert.equal(goalResponse.json().contract.deadline, "2026-09-05T18:00:00+08:00");
+  const goalId = goalResponse.json().id as string;
+
+  const commitmentResponse = await app.inject({
+    method: "POST",
+    url: "/api/v1/commitments",
+    headers: { ...writeHeaders, "idempotency-key": "phase-4-commitment" },
+    payload: {
+      goalId,
+      owner: "AGENT_OS",
+      owedTo: "USER",
+      promise: "Prepare the daily responsibility summary",
+      dueAt: "2026-09-04T18:00:00+08:00",
+      followUpPolicy: "remind_24h_before",
+    },
+  });
+  assert.equal(commitmentResponse.statusCode, 201);
+  const commitmentId = commitmentResponse.json().id as string;
+
+  const portfolio = await app.inject({ method: "GET", url: "/api/v1/portfolio", headers: { cookie } });
+  assert.equal(portfolio.statusCode, 200);
+  assert.equal(portfolio.json().activeProjects[0].id, projectId);
+  assert.equal(portfolio.json().commitments[0].id, commitmentId);
+
+  const detail = await app.inject({ method: "GET", url: `/api/v1/projects/${projectId}`, headers: { cookie } });
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.json().goals[0].id, goalId);
+  assert.equal(detail.json().commitments[0].id, commitmentId);
+  assert.equal(detail.json().timeline.some((event: { type: string }) => event.type === "goal.accepted"), true);
+
+  const approval = await app.inject({
+    method: "POST",
+    url: "/api/v1/approvals",
+    headers: writeHeaders,
+    payload: { goalId, action: { summary: "Publish the Secretary view" }, risk: "external_side_effect" },
+  });
+  assert.equal(approval.statusCode, 201);
+  const approvalId = approval.json().id as string;
+  const decisionQueue = await app.inject({ method: "GET", url: "/api/v1/portfolio", headers: { cookie } });
+  assert.equal(decisionQueue.json().needsDecision[0].id, goalId);
+  assert.equal(decisionQueue.json().approvals[0].id, approvalId);
+  const decided = await app.inject({
+    method: "POST",
+    url: `/api/v1/approvals/${approvalId}/decision`,
+    headers: writeHeaders,
+    payload: { decision: "APPROVED", reason: "Owner approved the publication." },
+  });
+  assert.equal(decided.statusCode, 200);
+  assert.equal(decided.json().status, "APPROVED");
+
+  const fulfilled = await app.inject({
+    method: "POST",
+    url: `/api/v1/commitments/${commitmentId}/fulfill`,
+    headers: writeHeaders,
+    payload: { evidenceRefs: ["artifact:daily-summary"] },
+  });
+  assert.equal(fulfilled.statusCode, 200);
+  assert.equal(fulfilled.json().status, "FULFILLED");
+});

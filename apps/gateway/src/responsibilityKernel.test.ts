@@ -171,3 +171,73 @@ test("only one worker acquires a lease and startup reconciliation recovers aband
   );
   restartedDatabase.close();
 });
+
+test("Phase 4 commitments schedule reminders and feed deterministic portfolio sections", () => {
+  const { database, kernel, owner } = fixture("phase-4-portfolio");
+  const project = kernel.createProject(owner.id, { name: "Secretary MVP" });
+  const now = new Date("2026-09-01T08:00:00.000Z");
+  const todayGoal = kernel.createGoal(owner.id, {
+    ...goalInput(project.id),
+    title: "High priority responsibility",
+    priority: { urgency: "high", userRank: 1 },
+  });
+  const upcomingGoal = kernel.createGoal(owner.id, {
+    ...goalInput(project.id),
+    title: "Upcoming responsibility",
+    deadline: "2026-09-05T18:00:00+08:00",
+  });
+  const waitingGoal = kernel.createGoal(owner.id, {
+    ...goalInput(project.id),
+    title: "Waiting on vendor",
+  });
+  const commitment = kernel.createCommitment(owner.id, {
+    goalId: waitingGoal.id,
+    owner: "EXTERNAL_PARTY",
+    owedTo: "USER",
+    promise: "Vendor supplies the signed agreement",
+    dueAt: "2026-09-03T18:00:00+08:00",
+    followUpPolicy: "remind_24h_before",
+  }, "vendor-agreement");
+
+  const reminder = database.db.prepare(`SELECT * FROM wake_conditions
+    WHERE goal_id = ? AND idempotency_key = ?`).get(waitingGoal.id, `commitment:${commitment.id}:reminder`) as
+    | Record<string, unknown>
+    | undefined;
+  assert.ok(reminder);
+  assert.equal(reminder.due_at, "2026-09-02T10:00:00.000Z");
+  assert.equal(kernel.listGoalEvents(waitingGoal.id, owner.id).at(-1)?.type, "commitment.reminder_scheduled");
+
+  const portfolio = kernel.portfolio(owner.id, "Asia/Taipei", now);
+  assert.equal(portfolio.today.some((goal) => goal.id === todayGoal.id), true);
+  assert.equal(portfolio.upcoming.some((goal) => goal.id === upcomingGoal.id), true);
+  assert.equal(portfolio.waitingOnOthers.some((goal) => goal.id === waitingGoal.id), true);
+  assert.equal(portfolio.activeProjects[0]?.activeGoalCount, 3);
+  assert.equal(portfolio.activeProjects[0]?.openCommitmentCount, 1);
+
+  const approval = kernel.requestApproval(owner.id, {
+    goalId: todayGoal.id,
+    action: { summary: "Publish the prepared portfolio" },
+    risk: "external_side_effect",
+  });
+  const decisionPortfolio = kernel.portfolio(owner.id, "Asia/Taipei", now);
+  assert.equal(decisionPortfolio.needsDecision.some((goal) => goal.id === todayGoal.id), true);
+  assert.equal(decisionPortfolio.waitingOnYou.some((goal) => goal.id === todayGoal.id), true);
+  assert.equal(decisionPortfolio.approvals[0]?.id, approval.id);
+  assert.equal(kernel.decideApproval(approval.id, owner.id, "APPROVED", "Owner approved publication.").status, "APPROVED");
+  assert.equal(kernel.getGoal(todayGoal.id, owner.id).status, "ACTIVE");
+  assert.equal(
+    kernel.listGoalWakes(todayGoal.id, owner.id).some((wake) => wake.type === "APPROVAL_GRANTED"),
+    true,
+  );
+
+  const detail = kernel.getProjectDetail(project.id, owner.id);
+  assert.equal(detail.goals.length, 3);
+  assert.equal(detail.commitments[0]?.id, commitment.id);
+  assert.equal(detail.timeline.some((event) => event.type === "commitment.reminder_scheduled"), true);
+  assert.equal(kernel.transitionCommitment(commitment.id, owner.id, "FULFILLED", ["artifact:agreement"]).status, "FULFILLED");
+  assert.equal(
+    (database.db.prepare("SELECT status FROM wake_conditions WHERE id = ?").get(String(reminder.id)) as { status: string }).status,
+    "CANCELLED",
+  );
+  database.close();
+});
