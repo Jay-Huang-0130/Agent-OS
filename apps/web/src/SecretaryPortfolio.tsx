@@ -261,7 +261,12 @@ function GoalDrawer({ goalId, automations, client, onClose, onChanged }: {
     try { setDetail(await client.goalDetail(goalId)); setError(""); }
     catch (cause) { setError(errorMessage(cause)); }
   };
-  useEffect(() => { setDetail(undefined); void load(); }, [goalId]);
+  useEffect(() => {
+    setDetail(undefined);
+    void load();
+    const timer = window.setInterval(() => void load(), 3_000);
+    return () => window.clearInterval(timer);
+  }, [goalId]);
   const act = async (action: "pause" | "resume" | "cancel") => {
     if (!detail || (action === "cancel" && !window.confirm(`確定取消「${detail.goal.title}」？`))) return;
     setBusy(true);

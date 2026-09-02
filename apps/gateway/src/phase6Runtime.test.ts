@@ -7,6 +7,7 @@ import { TrackedModelRuntime } from "./modelRuntime.js";
 import {
   BoundedAgentWorker,
   GoalCompiler,
+  ImmediatePlanRunner,
   Phase6RequestRouter,
   PlanManager,
   PlanRuntime,
@@ -141,6 +142,16 @@ test("bounded worker rejects prose-only completion and accepts a Result Envelope
   assert.deepEqual(runtime.calls, ["WORKER", "WORKER"]);
 });
 
+test("bounded worker reports a real blocker instead of pretending an unconnected tool was used", async () => {
+  const runtime = new FakeRuntime([]);
+  const result = await new BoundedAgentWorker(runtime).execute({ ownerUserId: "owner", goalId: "goal", taskId: "task",
+    objective: "Browse the official catalog", context: {}, allowedTools: ["web_search"],
+    budget: { maxTokens: 1000, maxDurationMs: 30_000, maxAttempts: 1 } });
+  assert.equal(result.status, "BLOCKED");
+  assert.match(result.summary, /web_search/u);
+  assert.deepEqual(runtime.calls, []);
+});
+
 test("Plan Manager runs a Task Packet through verification and persists only the Result Envelope", async () => {
   const database = new AgentDatabase(":memory:");
   const owner = database.createOwner("Owner", "hash", "salt");
@@ -149,11 +160,38 @@ test("Plan Manager runs a Task Packet through verification and persists only the
     evidence: [{ kind: "TEST", reference: "test:manager", summary: "Manager test passed." }], nextActions: [] }]);
   try {
     const materialized = new PlanRuntime(kernel).materialize(owner.id, "manager-request", compiledGoal());
-    await new PlanManager(database, kernel, runtime).executeTask(owner.id, materialized.tasks[0]!.id);
+    await new PlanManager(database, kernel, runtime, new Set(["fetch"])).executeTask(owner.id, materialized.tasks[0]!.id);
     const task = kernel.getTask(materialized.tasks[0]!.id);
     assert.equal(task.status, "COMPLETED");
     assert.equal(resultEnvelopeSchema.parse(task.result).evidence[0]?.reference, "test:manager");
     assert.equal(kernel.getGoal(materialized.goal.id, owner.id).status, "ACTIVE");
+  } finally { database.close(); }
+});
+
+test("immediate plan runner executes dependency-ordered Tasks and completes the Goal with evidence", async () => {
+  const database = new AgentDatabase(":memory:");
+  const owner = database.createOwner("Owner", "hash", "salt");
+  const kernel = new ResponsibilityKernel(database, { reconcileOnStart: false });
+  const runtime = new FakeRuntime([
+    { status: "COMPLETED", summary: "first done", outputs: [{ name: "one", value: "ok" }],
+      evidence: [{ kind: "TEST", reference: "test:first", summary: "First node verified." }], nextActions: [] },
+    { status: "COMPLETED", summary: "second done", outputs: [{ name: "two", value: "ok" }],
+      evidence: [{ kind: "TEST", reference: "test:second", summary: "Second node verified." }], nextActions: [] },
+  ]);
+  try {
+    const definition = compiledGoal();
+    definition.plan.nodes[0]!.allowedTools = [];
+    definition.plan.nodes.push({ id: "publish", title: "Publish verified result", kind: "ACTION", dependsOn: ["collect"],
+      completionCriteria: ["Result is published"], allowedTools: [], maxTokens: 1000, maxDurationMs: 30_000, maxAttempts: 1 });
+    const materialized = new PlanRuntime(kernel).materialize(owner.id, "immediate-run", definition);
+
+    await new ImmediatePlanRunner(database, kernel, runtime).runNow(owner.id, materialized.goal.id);
+
+    const detail = kernel.getGoalDetail(materialized.goal.id, owner.id);
+    assert.equal(detail.goal.status, "COMPLETED");
+    assert.deepEqual(detail.tasks.map((task) => task.status), ["COMPLETED", "COMPLETED"]);
+    assert.deepEqual(runtime.calls, ["WORKER", "WORKER"]);
+    assert.equal(detail.timeline.some((event) => event.type === "goal.completed"), true);
   } finally { database.close(); }
 });
 

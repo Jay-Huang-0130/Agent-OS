@@ -14,6 +14,7 @@ import type {
   GoalRecord,
   PortfolioSnapshot,
   ProjectRecord,
+  RecordsSnapshot,
   ResourceMetric,
   Settings,
   SetupInput,
@@ -532,9 +533,37 @@ function ConversationsPage({ onOpenAssistant, embedded = false }: { onOpenAssist
   return <div className="conversations-page">{!embedded && <header className="library-header"><div><p className="eyebrow">Conversations</p><h1>對話紀錄</h1><p>回顧交付過的指令、補充內容與 Agent 的回覆。</p></div><button className="primary" onClick={onOpenAssistant}><Icon name="sparkle" />開始新對話</button></header>}<div className="conversation-layout"><aside className="conversation-list"><label className="conversation-search"><Icon name="eye" size={17} /><input placeholder="搜尋對話…" /></label><div>{demoConversations.map((item) => <button key={item.id} className={selectedId === item.id ? "active" : ""} onClick={() => setSelectedId(item.id)}><span className="conversation-avatar"><Icon name="sparkle" size={17} /></span><span><strong>{item.title}</strong><small>{item.preview}</small></span><time>{item.time}</time></button>)}</div></aside><section className="conversation-thread"><header><div><h2>{conversation.title}</h2><p>與 Agent-OS 的歷史對話</p></div><button className="icon-only"><Icon name="settings" size={17} /></button></header><div className="message-history">{conversation.messages.map((message, index) => <div className={`history-message ${message.role}`} key={`${message.role}-${index}`}><span>{message.role === "agent" ? <Icon name="sparkle" size={17} /> : "JA"}</span><div><small>{message.role === "agent" ? "Agent-OS" : "你"}</small><p>{message.text}</p>{message.task && <button className="conversation-task-link"><Icon name="check" size={16} /><span><strong>已建立任務</strong>{message.task}</span><Icon name="chevron" size={16} /></button>}</div></div>)}</div><footer><button onClick={onOpenAssistant}><Icon name="sparkle" />繼續這段對話</button></footer></section></div></div>;
 }
 
-function RecordsPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTask) => void; onOpenAssistant: () => void }) {
+function PrototypeRecordsPage({ onOpenTask, onOpenAssistant }: { onOpenTask: (task: DemoTask) => void; onOpenAssistant: () => void }) {
   const [tab, setTab] = useState<"outputs" | "conversations">("outputs");
   return <div className="records-page"><header className="library-header"><div><p className="eyebrow">Records</p><h1>紀錄</h1><p>需要回頭查看的成果與對話，都收在同一個地方。</p></div></header><div className="record-tabs"><button className={tab === "outputs" ? "active" : ""} onClick={() => setTab("outputs")}><Icon name="storage" />成果<span>{demoOutputs.length}</span></button><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}><Icon name="model" />對話<span>{demoConversations.length}</span></button></div>{tab === "outputs" ? <OutputsPage embedded onOpenTask={onOpenTask} /> : <ConversationsPage embedded onOpenAssistant={onOpenAssistant} />}</div>;
+}
+
+function recordSummary(result: unknown): string {
+  if (!result || typeof result !== "object") return "尚未產生執行結果。";
+  const record = result as Record<string, unknown>;
+  return typeof record.summary === "string" ? record.summary : JSON.stringify(result);
+}
+
+function RecordsPage({ records, loading, onRefresh }: { records?: RecordsSnapshot; loading: boolean; onRefresh: () => void }) {
+  const [tab, setTab] = useState<"tasks" | "conversations" | "runs" | "events">("tasks");
+  const [selectedConversation, setSelectedConversation] = useState<string>();
+  const conversations = useMemo(() => {
+    const grouped = new Map<string, AssistantRequestRecord[]>();
+    for (const request of records?.conversations ?? []) {
+      grouped.set(request.conversationId, [...(grouped.get(request.conversationId) ?? []), request]);
+    }
+    return [...grouped.entries()].map(([id, requests]) => ({ id, requests: requests.sort((a, b) => a.createdAt.localeCompare(b.createdAt)) }))
+      .sort((a, b) => (b.requests.at(-1)?.createdAt ?? "").localeCompare(a.requests.at(-1)?.createdAt ?? ""));
+  }, [records]);
+  const activeConversation = conversations.find((item) => item.id === selectedConversation) ?? conversations[0];
+  if (!records && loading) return <div className="records-real-loading"><span className="loader" />讀取真實紀錄…</div>;
+  return <div className="records-page real-records"><header className="library-header"><div><p className="eyebrow">Durable records</p><h1>紀錄</h1><p>直接顯示 SQLite 中的 Task 結果、對話、模型執行與事件，不使用示範資料。</p></div><button className="secondary" disabled={loading} onClick={onRefresh}><Icon name="refresh" />{loading ? "更新中…" : "重新整理"}</button></header>
+    <div className="record-tabs"><button className={tab === "tasks" ? "active" : ""} onClick={() => setTab("tasks")}><Icon name="check" />Task 結果<span>{records?.tasks.length ?? 0}</span></button><button className={tab === "conversations" ? "active" : ""} onClick={() => setTab("conversations")}><Icon name="model" />對話<span>{conversations.length}</span></button><button className={tab === "runs" ? "active" : ""} onClick={() => setTab("runs")}><Icon name="activity" />模型執行<span>{records?.modelRuns.length ?? 0}</span></button><button className={tab === "events" ? "active" : ""} onClick={() => setTab("events")}><Icon name="update" />Audit Events<span>{records?.events.length ?? 0}</span></button></div>
+    {tab === "tasks" && <div className="real-task-results">{records?.tasks.length ? records.tasks.map((task) => { const result = task.result && typeof task.result === "object" ? task.result as Record<string, unknown> : undefined; const evidence = Array.isArray(result?.evidence) ? result.evidence as Array<Record<string, unknown>> : []; const artifacts = records.artifacts.filter((item) => item.taskId === task.id); return <details className={`real-result-card ${task.status.toLowerCase()}`} key={task.id} open={["COMPLETED", "FAILED", "BLOCKED"].includes(task.status)}><summary><span className="result-state-dot" /><div><small>{task.goalTitle}・{task.kind}</small><h2>{task.title}</h2><p>{recordSummary(task.result)}</p></div><b>{task.status}</b><time>{new Date(task.updatedAt).toLocaleString("zh-TW")}</time></summary><div className="real-result-body"><div><h3>Result Envelope</h3><pre>{task.result ? JSON.stringify(task.result, null, 2) : "尚未執行，因此沒有 Result Envelope。"}</pre></div><div><h3>Evidence</h3>{evidence.length ? <ul>{evidence.map((item, index) => <li key={index}><strong>{String(item.kind ?? "EVIDENCE")}</strong><span>{String(item.summary ?? "")}</span><code>{String(item.reference ?? "")}</code></li>)}</ul> : <p>尚無 Evidence。</p>}<h3>Artifacts</h3>{artifacts.length ? artifacts.map((artifact) => <a href={artifact.uri} key={artifact.id}><Icon name="storage" size={14} />{artifact.kind}・{artifact.uri}</a>) : <p>尚無 Artifact。</p>}</div></div></details>; }) : <div className="records-empty"><Icon name="check" /><strong>尚無 Task 紀錄</strong><p>建立並執行 Goal 後，結果會出現在這裡。</p></div>}</div>}
+    {tab === "conversations" && <div className="real-conversation-layout"><aside>{conversations.map((conversation) => { const last = conversation.requests.at(-1); return <button className={activeConversation?.id === conversation.id ? "active" : ""} key={conversation.id} onClick={() => setSelectedConversation(conversation.id)}><span><strong>{conversation.requests[0]?.message ?? "新對話"}</strong><small>{last?.assistantMessage ?? last?.routingReason ?? "等待回覆"}</small></span><time>{last ? new Date(last.createdAt).toLocaleDateString("zh-TW") : ""}</time></button>; })}</aside><section>{activeConversation ? activeConversation.requests.map((request) => <div className="real-conversation-pair" key={request.id}><div className="history-message user"><span>JA</span><div><small>你・{new Date(request.createdAt).toLocaleString("zh-TW")}</small><p>{request.message}</p></div></div>{request.assistantMessage && <div className="history-message agent"><span><Icon name="sparkle" size={17} /></span><div><small>Agent-OS・{request.executionMode ?? request.status}</small><ChatText text={request.assistantMessage} /></div></div>}</div>) : <div className="records-empty">尚無對話紀錄</div>}</section></div>}
+    {tab === "runs" && <div className="model-run-table">{records?.modelRuns.length ? records.modelRuns.map((run) => <details key={run.id}><summary><span className={`run-status ${run.status.toLowerCase()}`} /><div><strong>{run.purpose}</strong><small>{run.provider}・{run.model}</small></div><b>{run.status}</b><time>{new Date(run.startedAt).toLocaleString("zh-TW")}</time></summary><div><p>Goal：{run.goalId ?? "—"}・Task：{run.taskId ?? "—"}</p><h4>Usage</h4><pre>{JSON.stringify(run.usage ?? {}, null, 2)}</pre>{run.error != null && <><h4>Error</h4><pre>{JSON.stringify(run.error, null, 2)}</pre></>}</div></details>) : <div className="records-empty">尚無模型執行紀錄</div>}</div>}
+    {tab === "events" && <div className="real-event-list">{records?.events.length ? records.events.map((event) => <article key={event.id}><span><Icon name="update" size={15} /></span><div><strong>{event.type}</strong><p>{event.aggregateType}・{event.aggregateId}</p><small>{new Date(event.occurredAt).toLocaleString("zh-TW")}・{event.actor}</small></div><details><summary>資料</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details></article>) : <div className="records-empty">尚無 Goal Event</div>}</div>}
+  </div>;
 }
 
 function NotificationCenter({ items, onClose, onRead, onReadAll, onOpenTask }: { items: NotificationItem[]; onClose: () => void; onRead: (id: string) => void; onReadAll: () => void; onOpenTask: (task: DemoTask) => void }) {
@@ -555,6 +584,8 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [goals, setGoals] = useState<GoalRecord[]>([]);
   const [automations, setAutomations] = useState<AutomationRecord[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityRecord[]>([]);
+  const [records, setRecords] = useState<RecordsSnapshot>();
+  const [recordsLoading, setRecordsLoading] = useState(false);
   const [settings, setSettings] = useState<Settings>();
   const [openAI, setOpenAI] = useState<OpenAIConnection>();
   const [error, setError] = useState("");
@@ -589,9 +620,17 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     }
   };
 
+  const refreshRecords = async () => {
+    setRecordsLoading(true);
+    try { setRecords(await client.records()); setError(""); }
+    catch (cause) { setError(messageFor(cause)); }
+    finally { setRecordsLoading(false); }
+  };
+
   useEffect(() => {
     void refresh();
     void refreshResponsibilities();
+    void refreshRecords();
     void client.settings().then(setSettings).catch((cause) => setError(messageFor(cause)));
     const stop = client.subscribe((event) => {
       if (event.type === "activity.created") setSnapshot((current) => current ? { ...current, activity: [event.data, ...current.activity].slice(0, 30) } : current);
@@ -603,7 +642,10 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
         setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
         setToast(event.data);
       }
-      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected", "capability.validated", "automation.created", "automation.cancelled"].includes(event.type)) void refreshResponsibilities();
+      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected", "capability.validated", "automation.created", "automation.cancelled"].includes(event.type)) {
+        void refreshResponsibilities();
+        void refreshRecords();
+      }
     }, setConnection);
     return stop;
   }, []);
@@ -641,10 +683,9 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       <header className="topbar"><button className="icon-only menu-button" onClick={() => setMobileNav(true)}><Icon name="menu" /></button><div className="topbar-title"><strong>{pageTitles[view]}</strong><small>Agent-OS・{settings.deviceName}</small></div><div className={`connection ${connection}`}><i />{connection === "online" ? "即時連線" : connection === "reconnecting" ? "重新連線" : "連線中"}</div><button className="notification-button" onClick={() => setNotificationOpen(true)} aria-label="開啟通知中心"><Icon name="warning" size={18} />{unreadCount > 0 && <span>{unreadCount}</span>}</button><span className="topbar-avatar avatar">{bootstrap.session.user?.initials ?? "AO"}</span></header>
       <main className={`content ${["overview", "tasks", "records"].includes(view) ? "workspace-content" : ""}`}>
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
-        {view === "records" && <div className="prototype-notice" role="note"><Icon name="warning" size={17} /><span><strong>Records UI 原型</strong>成果與對話仍是示範資料，會在後續 Runtime / Memory Phase 接入。</span></div>}
         {view === "overview" && <SecretaryOverview name={name} snapshot={portfolio} projects={projects} automations={automations} client={client} onChanged={refreshResponsibilities} onChat={() => setAssistantOpen(true)} />}
         {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} automations={automations} capabilities={capabilities} client={client} onChanged={refreshResponsibilities} />}
-        {view === "records" && <RecordsPage onOpenTask={setSelectedTask} onOpenAssistant={() => setAssistantOpen(true)} />}
+        {view === "records" && <RecordsPage records={records} loading={recordsLoading} onRefresh={() => void refreshRecords()} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}
         {view === "settings" && <SettingsPage value={settings} provider={openAI} onProvider={setOpenAI} onSave={async (next) => setSettings(await client.updateSettings(next))} onNavigate={setView} />}

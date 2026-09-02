@@ -247,6 +247,26 @@ export interface GoalDetail {
   timeline: ResponsibilityEvent[];
 }
 
+export interface RecordsSnapshot {
+  generatedAt: string;
+  conversations: AssistantRequestRecord[];
+  tasks: Array<TaskRecord & { goalTitle: string }>;
+  modelRuns: Array<{
+    id: string; requestId: string | null; goalId: string | null; taskId: string | null;
+    purpose: string; provider: string; model: string; status: string;
+    output: unknown; error: unknown; usage: Record<string, unknown> | null; budget: Record<string, unknown>;
+    startedAt: string; completedAt: string | null; createdAt: string;
+  }>;
+  events: Array<{
+    id: string; goalId: string; aggregateType: string; aggregateId: string; sequence: number;
+    type: string; data: Record<string, unknown>; actor: string; occurredAt: string;
+  }>;
+  artifacts: Array<{
+    id: string; goalId: string | null; taskId: string | null; kind: string; uri: string;
+    sha256: string | null; metadata: Record<string, unknown>; createdAt: string;
+  }>;
+}
+
 export interface CommitmentRecord {
   id: string;
   goalId: string;

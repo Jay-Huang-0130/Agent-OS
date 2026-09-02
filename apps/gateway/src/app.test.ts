@@ -494,6 +494,10 @@ test("Phase 6 assistant answers a question through the model runtime without cre
   const models = await app.inject({ method: "GET", url: "/api/v1/providers/openai/models", headers: { cookie } });
   assert.equal(models.statusCode, 200);
   assert.equal(models.json()[0].model, "gpt-test");
+  const records = await app.inject({ method: "GET", url: "/api/v1/records", headers: { cookie } });
+  assert.equal(records.statusCode, 200);
+  assert.equal(records.json().conversations[0].conversationId, "bf2abf83-6fea-4a3e-925c-52d2bde3264f");
+  assert.equal(records.json().modelRuns.some((run: { purpose: string }) => run.purpose === "DIRECT_RESPONSE"), true);
   const goals = await app.inject({ method: "GET", url: "/api/v1/goals", headers: { cookie } });
   assert.equal(goals.json().length, 0);
 });

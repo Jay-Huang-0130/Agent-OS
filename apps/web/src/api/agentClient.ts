@@ -20,6 +20,7 @@ import type {
   PortfolioSnapshot,
   ProjectDetail,
   ProjectRecord,
+  RecordsSnapshot,
   SessionResponse,
   Settings,
   SetupInput,
@@ -87,6 +88,10 @@ export class AgentClient {
       this.request<ActivityItem[]>("/api/v1/activity"),
     ]);
     return { system, activity };
+  }
+
+  records(): Promise<RecordsSnapshot> {
+    return this.request<RecordsSnapshot>("/api/v1/records");
   }
 
   submitAssistantRequest(message: string, options: { conversationId: string; model?: string }): Promise<AssistantIntakeReceipt> {

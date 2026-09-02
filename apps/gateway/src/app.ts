@@ -21,7 +21,7 @@ import { publicDeviceName } from "./config.js";
 import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
 import { AgentDatabase, type ActivityRecord } from "./database.js";
 import { ModelRuntimeError, TrackedModelRuntime, type ModelRuntime } from "./modelRuntime.js";
-import { ModelAiWakeExecutor, Phase6AssistantExecutor, Phase6RequestRouter } from "./phase6Runtime.js";
+import { ImmediatePlanRunner, ModelAiWakeExecutor, Phase6AssistantExecutor, Phase6RequestRouter } from "./phase6Runtime.js";
 import { collectSystemStatus } from "./metrics.js";
 import {
   autonomyLevels,
@@ -181,10 +181,16 @@ export interface BuildAppOptions {
   aiWakeExecutor?: AiWakeExecutor;
   wakeEngine?: Omit<WakeEngineOptions, "notify" | "aiExecutor">;
   startWakeEngine?: boolean;
+  startPlanRunner?: boolean;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
   return reply.code(status).send({ code, message });
+}
+
+function storedJson(value: unknown): unknown {
+  if (typeof value !== "string" || !value) return null;
+  try { return JSON.parse(value) as unknown; } catch { return null; }
 }
 
 function kernelApiError(reply: FastifyReply, error: unknown) {
@@ -313,9 +319,14 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const rawModelRuntime = options.modelRuntime ?? authRuntime;
   const modelRuntime = rawModelRuntime ? new TrackedModelRuntime(database, rawModelRuntime) : undefined;
   const requestRouter = options.requestRouter ?? (modelRuntime ? new Phase6RequestRouter(modelRuntime) : undefined);
+  const planRunner = modelRuntime ? new ImmediatePlanRunner(database, kernel, modelRuntime,
+    (event) => broadcast(event)) : undefined;
+  const planRunnerEnabled = options.startPlanRunner ?? options.startWakeEngine !== false;
+  if (planRunner && planRunnerEnabled) planRunner.start();
   const assistantExecution = modelRuntime
     ? new Phase6AssistantExecutor(modelRuntime, kernel, capabilityService, automationService,
       () => database.getSettings(settingsDefaults()).timezone,
+      planRunnerEnabled ? (ownerUserId, goalId) => planRunner?.enqueue(ownerUserId, goalId) : undefined,
       (event) => broadcast(event))
     : undefined;
   const assistantIntake = requestRouter
@@ -457,6 +468,44 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   app.get("/api/v1/activity", async (request, reply) => {
     if (!requireSession(request, reply, database)) return;
     return database.listActivity(30).map(activityForApi);
+  });
+
+  app.get("/api/v1/records", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const tasks = database.db.prepare(`SELECT t.*, g.title AS goal_title FROM tasks t
+      JOIN goals g ON g.id = t.goal_id WHERE g.owner_user_id = ? ORDER BY t.updated_at DESC LIMIT 500`)
+      .all(session.userId) as Array<Record<string, unknown>>;
+    const runs = database.db.prepare(`SELECT * FROM model_runs WHERE owner_user_id = ?
+      ORDER BY created_at DESC LIMIT 500`).all(session.userId) as Array<Record<string, unknown>>;
+    const events = database.db.prepare(`SELECT e.* FROM events e JOIN goals g ON g.id = e.goal_id
+      WHERE g.owner_user_id = ? ORDER BY e.occurred_at DESC, e.sequence DESC LIMIT 500`)
+      .all(session.userId) as Array<Record<string, unknown>>;
+    const artifacts = database.db.prepare(`SELECT a.* FROM artifact_refs a LEFT JOIN goals g ON g.id = a.goal_id
+      LEFT JOIN tasks t ON t.id = a.task_id LEFT JOIN goals tg ON tg.id = t.goal_id
+      WHERE g.owner_user_id = ? OR tg.owner_user_id = ? ORDER BY a.created_at DESC LIMIT 500`)
+      .all(session.userId, session.userId) as Array<Record<string, unknown>>;
+    return {
+      generatedAt: new Date().toISOString(),
+      conversations: database.listAssistantRequests(session.userId, 200),
+      tasks: tasks.map((row) => ({ id: String(row.id), goalId: String(row.goal_id), goalTitle: String(row.goal_title),
+        planId: row.plan_id === null ? null : String(row.plan_id), title: String(row.title), kind: String(row.kind),
+        status: String(row.status), position: Number(row.position), specification: storedJson(row.specification_json) ?? {},
+        result: storedJson(row.result_json), attempts: Number(row.attempts), createdAt: String(row.created_at), updatedAt: String(row.updated_at) })),
+      modelRuns: runs.map((row) => ({ id: String(row.id), requestId: row.request_id === null ? null : String(row.request_id),
+        goalId: row.goal_id === null ? null : String(row.goal_id), taskId: row.task_id === null ? null : String(row.task_id),
+        purpose: String(row.purpose), provider: String(row.provider), model: String(row.model), status: String(row.status),
+        output: storedJson(row.output_json), error: storedJson(row.error_json), usage: storedJson(row.usage_json),
+        budget: storedJson(row.budget_json) ?? {}, startedAt: String(row.started_at),
+        completedAt: row.completed_at === null ? null : String(row.completed_at), createdAt: String(row.created_at) })),
+      events: events.map((row) => ({ id: String(row.id), goalId: String(row.goal_id), aggregateType: String(row.aggregate_type),
+        aggregateId: String(row.aggregate_id), sequence: Number(row.sequence), type: String(row.type),
+        data: storedJson(row.data_json) ?? {}, actor: String(row.actor), occurredAt: String(row.occurred_at) })),
+      artifacts: artifacts.map((row) => ({ id: String(row.id), goalId: row.goal_id === null ? null : String(row.goal_id),
+        taskId: row.task_id === null ? null : String(row.task_id), kind: String(row.kind), uri: String(row.uri),
+        sha256: row.sha256 === null ? null : String(row.sha256), metadata: storedJson(row.metadata_json) ?? {},
+        createdAt: String(row.created_at) })),
+    };
   });
 
   app.get("/api/v1/settings", async (request, reply) => {
@@ -980,6 +1029,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
 
   app.addHook("onClose", async () => {
     clearInterval(heartbeat);
+    await planRunner?.stop();
     await wakeEngine.stop();
     for (const socket of sockets) socket.close(1001, "server shutdown");
     sockets.clear();

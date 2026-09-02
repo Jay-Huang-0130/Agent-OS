@@ -281,6 +281,7 @@ export class Phase6AssistantExecutor implements AssistantExecution {
     private readonly runtime: ModelRuntime, kernel: ResponsibilityKernel,
     private readonly capabilities: CapabilityService, private readonly automations: AutomationService,
     private readonly getTimezone: () => string,
+    private readonly enqueueImmediate?: (ownerUserId: string, goalId: string) => void,
     private readonly emit?: ((event: { type: string; data: Record<string, unknown> }) => void),
   ) { this.compiler = new GoalCompiler(runtime); this.plans = new PlanRuntime(kernel); }
 
@@ -319,10 +320,11 @@ export class Phase6AssistantExecutor implements AssistantExecution {
         notificationTemplate: compiled.automation.notificationTemplate, misfirePolicy: "RUN_LATEST_ONLY",
       }, `assistant:${input.requestId}:automation`);
     }
+    if (!automation) this.enqueueImmediate?.(input.ownerUserId, materialized.goal.id);
     return { goalId: materialized.goal.id,
       assistantMessage: automation
         ? `已建立「${materialized.goal.title}」與版本 1 計畫，並安排 ${automation.executionMode === "DETERMINISTIC_AUTOMATION" ? "0-token Capability" : "AI 執行"}。`
-        : `已建立「${materialized.goal.title}」與版本 1 計畫，共 ${materialized.tasks.length} 個受限任務。` };
+        : `已建立「${materialized.goal.title}」與版本 1 計畫，共 ${materialized.tasks.length} 個受限任務，已交給背景 Worker 依序執行。` };
   }
 }
 
@@ -335,9 +337,15 @@ export const resultEnvelopeSchema = z.object({
 export type ResultEnvelope = z.infer<typeof resultEnvelopeSchema>;
 
 export class BoundedAgentWorker {
-  constructor(private readonly runtime: ModelRuntime) {}
+  constructor(private readonly runtime: ModelRuntime, private readonly availableTools: ReadonlySet<string> = new Set()) {}
   async execute(packet: { ownerUserId: string; goalId: string; taskId: string; objective: string; context: Record<string, unknown>;
     model?: string; allowedTools: string[]; budget: { maxTokens: number; maxDurationMs: number; maxAttempts: number } }): Promise<ResultEnvelope> {
+    const missingTools = packet.allowedTools.filter((tool) => !this.availableTools.has(tool));
+    if (missingTools.length) return {
+      status: "BLOCKED",
+      summary: `這個 Task 需要尚未連接的工具：${missingTools.join(", ")}。`,
+      outputs: [], evidence: [], nextActions: ["連接對應 Tool provider 後恢復 Goal。"],
+    };
     const schema = { type: "object", additionalProperties: false, required: ["status", "summary", "outputs", "evidence", "nextActions"],
       properties: { status: { type: "string", enum: ["COMPLETED", "BLOCKED", "FAILED"] }, summary: { type: "string" },
         outputs: { type: "array", items: { type: "object", additionalProperties: false, required: ["name", "value"],
@@ -350,7 +358,8 @@ export class BoundedAgentWorker {
       try {
         const result = await this.runtime.run({ purpose: "WORKER", ownerUserId: packet.ownerUserId, goalId: packet.goalId, taskId: packet.taskId,
           ...(packet.model ? { model: packet.model } : {}),
-          instructions: `Complete only the Task Packet. Allowed tools: ${packet.allowedTools.join(", ") || "none"}. Return evidence; prose alone cannot complete a task.`,
+          instructions: `Complete only the Task Packet. Allowed tool identifiers: ${packet.allowedTools.join(", ") || "none"}.
+Tool identifiers are policy metadata, not proof that a tool is connected. Do not claim browsing, API calls, file access or other tool work unless the runtime actually provided and executed that tool. If required evidence cannot be obtained with the connected runtime, return BLOCKED with the missing capability in nextActions. Return evidence; prose alone cannot complete a task.`,
           input: JSON.stringify({ objective: packet.objective, context: packet.context }), outputSchema: schema,
           parse: (value) => resultEnvelopeSchema.parse(value), timeoutMs: packet.budget.maxDurationMs, maxOutputTokens: packet.budget.maxTokens });
         if (result.usage.outputTokens > packet.budget.maxTokens) throw new ModelRuntimeError("provider_error", "Worker exceeded its token budget.", false);
@@ -400,8 +409,9 @@ export class GoalVerifier {
 export class PlanManager {
   private readonly worker: BoundedAgentWorker;
   private readonly verifier = new TaskVerifier();
-  constructor(private readonly database: AgentDatabase, private readonly kernel: ResponsibilityKernel, runtime: ModelRuntime) {
-    this.worker = new BoundedAgentWorker(runtime);
+  constructor(private readonly database: AgentDatabase, private readonly kernel: ResponsibilityKernel, runtime: ModelRuntime,
+    availableTools: ReadonlySet<string> = new Set()) {
+    this.worker = new BoundedAgentWorker(runtime, availableTools);
   }
 
   async executeTask(ownerUserId: string, taskId: string): Promise<ResultEnvelope> {
@@ -432,6 +442,122 @@ export class PlanManager {
       throw error;
     }
   }
+}
+
+export class ImmediatePlanRunner {
+  private readonly manager: PlanManager;
+  private readonly jobs = new Map<string, Promise<void>>();
+  private readonly deferredUntil = new Map<string, number>();
+  private timer: NodeJS.Timeout | undefined;
+
+  constructor(
+    private readonly database: AgentDatabase,
+    private readonly kernel: ResponsibilityKernel,
+    runtime: ModelRuntime,
+    private readonly emit?: (event: { type: string; data: GoalRecord }) => void,
+  ) { this.manager = new PlanManager(database, kernel, runtime); }
+
+  start(intervalMs = 1_000): void {
+    if (this.timer) return;
+    void this.scan();
+    this.timer = setInterval(() => void this.scan(), intervalMs);
+    this.timer.unref();
+  }
+
+  async stop(): Promise<void> {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    await Promise.allSettled([...this.jobs.values()]);
+  }
+
+  enqueue(ownerUserId: string, goalId: string): void {
+    void this.runNow(ownerUserId, goalId);
+  }
+
+  async runNow(ownerUserId: string, goalId: string): Promise<void> {
+    const active = this.jobs.get(goalId);
+    if (active) return active;
+    const job = this.runGoal(ownerUserId, goalId);
+    this.jobs.set(goalId, job);
+    try { await job; }
+    finally { this.jobs.delete(goalId); }
+  }
+
+  private async scan(): Promise<void> {
+    const rows = this.database.db.prepare(`SELECT DISTINCT g.id, g.owner_user_id FROM goals g
+      JOIN tasks t ON t.goal_id = g.id
+      WHERE g.status = 'ACTIVE' AND t.status IN ('PENDING', 'READY')
+      AND NOT EXISTS (SELECT 1 FROM automations a WHERE a.goal_id = g.id)`)
+      .all() as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const goalId = String(row.id);
+      if ((this.deferredUntil.get(goalId) ?? 0) <= Date.now()) this.enqueue(String(row.owner_user_id), goalId);
+    }
+  }
+
+  private async runGoal(ownerUserId: string, goalId: string): Promise<void> {
+    while (true) {
+      const detail = this.kernel.getGoalDetail(goalId, ownerUserId);
+      if (detail.goal.status !== "ACTIVE") return;
+      const completedNodes = new Set(detail.tasks.filter((task) => task.status === "COMPLETED")
+        .map((task) => String(task.specification.nodeId ?? task.id)));
+      const runnable = detail.tasks.find((task) => {
+        if (!["PENDING", "READY"].includes(task.status)) return false;
+        const dependencies = Array.isArray(task.specification.dependsOn)
+          ? task.specification.dependsOn.filter((item): item is string => typeof item === "string") : [];
+        return dependencies.every((dependency) => completedNodes.has(dependency));
+      });
+      if (!runnable) {
+        if (detail.tasks.length > 0 && detail.tasks.every((task) => task.status === "COMPLETED")) {
+          const verified = new GoalVerifier().verify(detail.goal,
+            detail.tasks.map((task) => ({ status: task.status, result: task.result })));
+          if (verified.accepted) {
+            const goal = this.kernel.completeGoal(goalId, ownerUserId, verified.evidenceRefs, verified.reason);
+            this.emit?.({ type: "goal.completed", data: goal });
+          } else {
+            const goal = this.kernel.blockGoal(goalId, ownerUserId, verified.reason);
+            this.emit?.({ type: "goal.blocked", data: goal });
+          }
+          return;
+        }
+        const failed = detail.tasks.find((task) => ["FAILED", "BLOCKED"].includes(task.status));
+        const reason = failed
+          ? `Task「${failed.title}」未完成：${resultSummary(failed.result)}`
+          : "Plan 沒有可執行的 Task；請檢查相依關係或可用工具。";
+        const goal = this.kernel.blockGoal(goalId, ownerUserId, reason);
+        this.emit?.({ type: "goal.blocked", data: goal });
+        return;
+      }
+      try {
+        await this.manager.executeTask(ownerUserId, runnable.id);
+        this.emit?.({ type: "goal.progressed", data: this.kernel.getGoal(goalId, ownerUserId) });
+      } catch (error) {
+        if (error instanceof ModelRuntimeError && (error.retryable || ["unavailable", "unauthenticated"].includes(error.code))) {
+          const failed = this.kernel.getTask(runnable.id);
+          if (failed.status === "FAILED") this.kernel.transitionTask(failed.id, "READY", ownerUserId);
+          this.deferredUntil.set(goalId, Date.now() + 30_000);
+          this.emit?.({ type: "goal.progressed", data: this.kernel.getGoal(goalId, ownerUserId) });
+          return;
+        }
+        const goal = this.kernel.blockGoal(goalId, ownerUserId,
+          `Task「${runnable.title}」執行失敗：${error instanceof Error ? error.message : String(error)}`);
+        this.emit?.({ type: "goal.blocked", data: goal });
+        return;
+      }
+    }
+  }
+}
+
+function resultSummary(result: unknown): string {
+  if (result && typeof result === "object") {
+    const record = result as Record<string, unknown>;
+    if (typeof record.summary === "string") return record.summary;
+    if (record.verification && typeof record.verification === "object"
+      && typeof (record.verification as Record<string, unknown>).reason === "string") {
+      return String((record.verification as Record<string, unknown>).reason);
+    }
+  }
+  return "沒有可驗證的結果。";
 }
 
 export class ModelAiWakeExecutor implements AiWakeExecutor {

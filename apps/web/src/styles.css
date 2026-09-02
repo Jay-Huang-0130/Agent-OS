@@ -754,6 +754,47 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .record-tabs span { min-width: 19px; height: 19px; display: grid; place-items: center; padding: 0 5px; border-radius: 20px; color: var(--muted); background: var(--soft); font-size: 10px; }
 .records-page > .library-page, .records-page > .conversations-page { animation: none; }
 .records-page .conversation-thread > footer { display: none; }
+.records-real-loading { min-height: 360px; display: grid; place-items: center; align-content: center; gap: 12px; color: var(--muted); }
+.real-task-results, .model-run-table, .real-event-list { display: grid; gap: 10px; }
+.real-result-card, .model-run-table details { overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.real-result-card > summary, .model-run-table summary { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 15px 17px; cursor: pointer; list-style: none; }
+.real-result-card > summary::-webkit-details-marker, .model-run-table summary::-webkit-details-marker { display: none; }
+.result-state-dot, .run-status { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.real-result-card.completed .result-state-dot, .run-status.completed { background: var(--green-2); }
+.real-result-card.failed .result-state-dot, .real-result-card.blocked .result-state-dot, .run-status.failed, .run-status.timed_out { background: var(--danger); }
+.real-result-card.running .result-state-dot, .run-status.running { background: var(--amber); animation: pulse 1.3s ease infinite; }
+.real-result-card summary h2 { margin: 3px 0; font-size: 14px; }
+.real-result-card summary p, .real-result-card summary small, .real-result-card summary time, .model-run-table summary small, .model-run-table summary time { overflow: hidden; margin: 0; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.real-result-card summary b, .model-run-table summary b { color: var(--green); font-size: 9px; }
+.real-result-body { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(240px, .7fr); gap: 14px; padding: 0 17px 17px 39px; }
+.real-result-body > div { min-width: 0; padding: 13px; border-radius: 10px; background: var(--soft); }
+.real-result-body h3 { margin: 0 0 8px; font-size: 11px; }
+.real-result-body pre, .model-run-table pre, .real-event-list pre { max-height: 260px; margin: 0; padding: 10px; overflow: auto; border-radius: 8px; color: var(--ink); background: color-mix(in srgb, var(--workspace) 70%, var(--panel)); font: 9px/1.55 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.real-result-body ul { display: grid; gap: 7px; margin: 0 0 13px; padding: 0; list-style: none; }
+.real-result-body li { display: grid; gap: 2px; font-size: 9px; }
+.real-result-body li strong { color: var(--green); }
+.real-result-body li span, .real-result-body p { color: var(--muted); }
+.real-result-body li code { overflow-wrap: anywhere; }
+.real-result-body a { display: flex; align-items: center; gap: 6px; color: var(--green); font-size: 9px; }
+.records-empty { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 7px; padding: 30px; color: var(--muted); border: 1px dashed var(--line); border-radius: 14px; text-align: center; }
+.records-empty p { margin: 0; font-size: 10px; }
+.real-conversation-layout { min-height: 560px; display: grid; grid-template-columns: 310px 1fr; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.real-conversation-layout > aside { overflow-y: auto; border-right: 1px solid var(--line); }
+.real-conversation-layout > aside button { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 14px; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); background: transparent; text-align: left; }
+.real-conversation-layout > aside button.active { background: var(--green-soft); }
+.real-conversation-layout > aside span { min-width: 0; display: grid; gap: 5px; }
+.real-conversation-layout > aside strong, .real-conversation-layout > aside small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.real-conversation-layout > aside strong { font-size: 11px; }
+.real-conversation-layout > aside small, .real-conversation-layout time { color: var(--muted); font-size: 8px; }
+.real-conversation-layout > section { padding: 22px; overflow-y: auto; }
+.real-conversation-pair { display: grid; gap: 9px; margin-bottom: 20px; }
+.model-run-table details > div { padding: 0 17px 17px 39px; }
+.model-run-table details > div p, .model-run-table h4 { color: var(--muted); font-size: 9px; }
+.real-event-list article { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(180px, .6fr); gap: 11px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.real-event-list article > span { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; color: var(--green); background: var(--green-soft); }
+.real-event-list article strong { font-size: 11px; }
+.real-event-list article p, .real-event-list article small { margin: 3px 0 0; color: var(--muted); font-size: 9px; }
+.real-event-list details summary { color: var(--green); font-size: 9px; cursor: pointer; }
 .library-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .library-header h1 { margin: 0; font-size: clamp(32px, 4vw, 46px); line-height: 1; letter-spacing: -.045em; }
 .library-header > div > p:last-child { margin: 11px 0 0; color: var(--muted); font-size: 15px; }
@@ -858,6 +899,15 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .library-toolbar { align-items: stretch; flex-direction: column; }
   .library-search { min-width: 0; }
   .conversation-layout { display: block; min-height: 0; overflow: visible; border: 0; background: transparent; box-shadow: none; }
+  .record-tabs { width: 100%; overflow-x: auto; }
+  .record-tabs button { min-width: 128px; }
+  .real-result-card > summary, .model-run-table summary { grid-template-columns: 10px 1fr auto; }
+  .real-result-card summary time, .model-run-table summary time { grid-column: 2 / -1; }
+  .real-result-body { grid-template-columns: 1fr; padding-left: 17px; }
+  .real-conversation-layout { display: block; min-height: 0; }
+  .real-conversation-layout > aside { max-height: 230px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .real-event-list article { grid-template-columns: 32px 1fr; }
+  .real-event-list details { grid-column: 2; }
   .conversation-list { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
   .conversation-thread { margin-top: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
   .message-history { max-height: 520px; padding: 22px 17px; }

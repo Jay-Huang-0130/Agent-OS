@@ -107,6 +107,19 @@ describe("AgentClient", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/goals/goal%2F1/detail", expect.any(Object));
   });
 
+  it("loads durable records instead of prototype output data", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      generatedAt: "2026-09-02T00:00:00.000Z", conversations: [],
+      tasks: [{ id: "task-real", status: "COMPLETED" }], modelRuns: [], events: [], artifacts: [],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const records = await new AgentClient().records();
+
+    expect(records.tasks[0]?.id).toBe("task-real");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/records", expect.any(Object));
+  });
+
   it("sends unclassified natural language through the unified assistant intake", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
