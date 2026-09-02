@@ -201,6 +201,52 @@ export interface GoalRecord {
   cancelledAt: string | null;
 }
 
+export interface PlanRecord {
+  id: string;
+  goalId: string;
+  version: number;
+  status: "DRAFT" | "ACTIVE" | "SUPERSEDED" | "COMPLETED" | "CANCELLED";
+  plan: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskRecord {
+  id: string;
+  goalId: string;
+  planId: string | null;
+  title: string;
+  kind: string;
+  status: string;
+  position: number;
+  specification: Record<string, unknown>;
+  result: unknown;
+  attempts: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WakeConditionRecord {
+  id: string;
+  goalId: string;
+  taskId: string | null;
+  type: string;
+  status: string;
+  dueAt: string | null;
+  payload: Record<string, unknown>;
+  misfirePolicy: string;
+  createdAt: string;
+  consumedAt: string | null;
+}
+
+export interface GoalDetail {
+  goal: GoalRecord;
+  plans: PlanRecord[];
+  tasks: TaskRecord[];
+  wakes: WakeConditionRecord[];
+  timeline: ResponsibilityEvent[];
+}
+
 export interface CommitmentRecord {
   id: string;
   goalId: string;

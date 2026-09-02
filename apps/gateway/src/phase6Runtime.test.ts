@@ -112,6 +112,11 @@ test("Plan Runtime persists versioned Plan IR and manager receives envelopes ins
     const materialized = new PlanRuntime(kernel).materialize(owner.id, "request-1", compiledGoal());
     assert.equal(materialized.plan.version, 1);
     assert.equal(materialized.tasks.length, 1);
+    const detail = kernel.getGoalDetail(materialized.goal.id, owner.id);
+    assert.equal(detail.plans[0]?.id, materialized.plan.id);
+    assert.equal(detail.tasks[0]?.id, materialized.tasks[0]?.id);
+    assert.equal(detail.wakes.length, 1);
+    assert.equal(detail.timeline.some((event) => event.type === "plan.activated"), true);
     kernel.transitionTask(materialized.tasks[0]!.id, "READY", owner.id);
     kernel.transitionTask(materialized.tasks[0]!.id, "LEASED", owner.id);
     kernel.transitionTask(materialized.tasks[0]!.id, "RUNNING", owner.id);

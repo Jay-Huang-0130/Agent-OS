@@ -13,6 +13,7 @@ import type {
   AutomationRecord,
   CreateGoalInput,
   GoalRecord,
+  GoalDetail,
   MetaResponse,
   OpenAIConnection,
   OpenAIDeviceLogin,
@@ -129,6 +130,10 @@ export class AgentClient {
 
   goals(): Promise<GoalRecord[]> {
     return this.request<GoalRecord[]>("/api/v1/goals");
+  }
+
+  goalDetail(id: string): Promise<GoalDetail> {
+    return this.request<GoalDetail>(`/api/v1/goals/${encodeURIComponent(id)}/detail`);
   }
 
   createProject(input: { name: string; description?: string }): Promise<ProjectRecord> {

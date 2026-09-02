@@ -632,6 +632,16 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     }
   });
 
+  app.get<{ Params: { id: string } }>("/api/v1/goals/:id/detail", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    try {
+      return kernel.getGoalDetail(request.params.id, session.userId);
+    } catch (error) {
+      return kernelApiError(reply, error);
+    }
+  });
+
   const goalAction = (action: "pause" | "resume" | "cancel") => async (
     request: FastifyRequest<{ Params: { id: string } }>,
     reply: FastifyReply,

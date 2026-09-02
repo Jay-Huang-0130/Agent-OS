@@ -135,6 +135,14 @@ export interface PlanRecord {
   updatedAt: string;
 }
 
+export interface GoalDetail {
+  goal: GoalRecord;
+  plans: PlanRecord[];
+  tasks: TaskRecord[];
+  wakes: WakeConditionRecord[];
+  timeline: EventRecord[];
+}
+
 export interface LeaseRecord {
   resourceType: string;
   resourceId: string;
@@ -747,6 +755,29 @@ export class ResponsibilityKernel {
 
   getGoal(id: string, ownerUserId: string): GoalRecord {
     return this.requireGoal(id, ownerUserId);
+  }
+
+  getGoalDetail(id: string, ownerUserId: string): GoalDetail {
+    const goal = this.requireGoal(id, ownerUserId);
+    const planRows = this.db.prepare("SELECT * FROM plans WHERE goal_id = ? ORDER BY version DESC")
+      .all(id) as Array<Record<string, unknown>>;
+    const taskRows = this.db.prepare("SELECT * FROM tasks WHERE goal_id = ? ORDER BY position, created_at")
+      .all(id) as Array<Record<string, unknown>>;
+    return {
+      goal,
+      plans: planRows.map((row) => ({
+        id: asString(row.id),
+        goalId: asString(row.goal_id),
+        version: Number(row.version),
+        status: asString(row.status) as PlanRecord["status"],
+        plan: parseJson<Record<string, unknown>>(row.plan_json, {}),
+        createdAt: asString(row.created_at),
+        updatedAt: asString(row.updated_at),
+      })),
+      tasks: taskRows.map(taskFromRow),
+      wakes: this.listGoalWakes(id, ownerUserId),
+      timeline: this.listGoalEvents(id, ownerUserId, 500),
+    };
   }
 
   private requireGoal(id: string, ownerUserId: string): GoalRecord {

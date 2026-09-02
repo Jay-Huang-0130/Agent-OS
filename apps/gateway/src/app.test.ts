@@ -288,6 +288,16 @@ test("owner can create and control durable Projects and Goals", async () => {
   assert.equal(listed.statusCode, 200);
   assert.equal(listed.json().length, 1);
 
+  const detail = await app.inject({
+    method: "GET",
+    url: `/api/v1/goals/${goalId}/detail`,
+    headers: { cookie },
+  });
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.json().goal.id, goalId);
+  assert.equal(detail.json().wakes.length, 1);
+  assert.deepEqual(detail.json().timeline.map((event: { type: string }) => event.type), ["goal.accepted"]);
+
   const paused = await app.inject({
     method: "POST",
     url: `/api/v1/goals/${goalId}/pause`,

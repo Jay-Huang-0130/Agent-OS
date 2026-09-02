@@ -1047,6 +1047,46 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .secretary-drawer-title h3 { margin: 0; font-size: 16px; }
 .secretary-drawer-title span { color: var(--muted); font-size: 11px; }
 .secretary-drawer-title button { padding: 6px 9px; border: 0; border-radius: 8px; color: var(--green); background: var(--green-soft); font-size: 11px; font-weight: 750; }
+.goal-detail-drawer { width: min(100%, 780px); }
+.goal-detail-status { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.goal-detail-status > span:last-child { color: var(--muted); font-size: 10px; font-weight: 750; }
+.goal-detail-overview { display: grid !important; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.goal-detail-overview > div { display: grid; gap: 5px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--soft); }
+.goal-detail-overview span { color: var(--muted); font-size: 9px; }
+.goal-detail-overview strong { font-size: 11px; overflow-wrap: anywhere; }
+.goal-state-reason { display: flex; align-items: flex-start; gap: 9px; margin-top: 18px; padding: 12px; border: 1px solid color-mix(in srgb, var(--amber) 30%, var(--line)); border-radius: 11px; color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--panel)); }
+.goal-state-reason span { display: grid; gap: 3px; color: var(--ink); font-size: 11px; }
+.contract-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.contract-grid article { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--soft); }
+.contract-grid h4 { margin: 0 0 8px; font-size: 12px; }
+.contract-grid p, .contract-grid ul, .goal-task-list ul { margin: 0; padding-left: 17px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.contract-grid p { padding-left: 0; }
+.active-plan-summary { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 9px; margin-bottom: 10px; padding: 11px 13px; border: 1px solid #cfe4d6; border-radius: 11px; background: var(--green-soft); }
+.active-plan-summary span { color: var(--green); font-size: 10px; font-weight: 800; }
+.active-plan-summary strong { justify-self: end; color: var(--green); font-size: 9px; }
+.active-plan-summary small { grid-column: 1 / -1; color: var(--muted); font-size: 9px; }
+.goal-task-list { display: grid; gap: 9px; }
+.goal-task-list > article { display: grid; grid-template-columns: 30px 1fr; gap: 11px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; }
+.goal-task-index { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 9px; color: var(--green); background: var(--green-soft); font-size: 11px; font-weight: 800; }
+.goal-task-list article header { display: flex; align-items: center; justify-content: space-between; }
+.goal-task-list article header span, .goal-task-list article header b { color: var(--green); font-size: 9px; }
+.goal-task-list article h4 { margin: 6px 0 7px; font-size: 12px; }
+.goal-task-list article > div > small { display: block; margin-top: 9px; color: var(--muted); font-size: 9px; }
+.task-result { margin-top: 10px; padding: 9px; border-radius: 9px; background: var(--soft); }
+.task-result strong, .task-result p { margin: 0; font-size: 10px; line-height: 1.5; }
+.task-result p { margin-top: 3px; color: var(--muted); }
+.goal-automation-list { display: grid; gap: 8px; }
+.goal-automation-list article { display: grid; grid-template-columns: 39px 1fr; align-items: center; gap: 11px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; }
+.goal-automation-list strong { font-size: 10px; }
+.goal-automation-list p, .goal-automation-list small { margin: 3px 0 0; color: var(--muted); font-size: 9px; }
+.goal-wake-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+.goal-wake-list > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; }
+.goal-wake-list span, .goal-wake-list strong, .goal-wake-list small { font-size: 9px; }
+.goal-wake-list strong { color: var(--green); }
+.goal-wake-list small { grid-column: 1 / -1; color: var(--muted); }
+.goal-detail-actions { position: sticky; bottom: -27px; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -27px -27px; padding: 15px 27px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 95%, transparent); backdrop-filter: blur(12px); }
+.goal-detail-actions button { padding: 8px 12px; }
+.goal-detail-actions .danger-link { border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line)); border-radius: 9px; color: var(--danger); background: transparent; }
 .detail-goals { display: grid; gap: 10px; }
 .detail-goals article { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: var(--soft); }
 .detail-goals article > div:first-child { display: flex; justify-content: space-between; align-items: center; }
@@ -1095,4 +1135,5 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .commitment-list article > b { grid-column: 2; }
   .automation-list article { grid-template-columns: 39px 1fr; }
   .automation-list article > button { grid-column: 2; justify-self: start; }
+  .goal-detail-overview, .contract-grid, .goal-wake-list { grid-template-columns: 1fr; }
 }

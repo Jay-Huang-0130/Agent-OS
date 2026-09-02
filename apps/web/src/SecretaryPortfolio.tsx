@@ -5,6 +5,7 @@ import type {
   AutonomyLevel,
   CapabilityRecord,
   CommitmentOwner,
+  GoalDetail,
   GoalRecord,
   GoalStatus,
   PortfolioSnapshot,
@@ -236,10 +237,63 @@ function ProjectDrawer({
   return <div className="secretary-drawer-layer" role="presentation" onMouseDown={onClose}><aside className="secretary-drawer" onMouseDown={(event) => event.stopPropagation()}>{!detail ? <div className="secretary-loading"><span className="loader" />{error || "讀取 Project…"}</div> : <><header><div><p className="eyebrow">Project detail</p><h2>{detail.project.name}</h2><p>{detail.project.description || "沒有額外說明"}</p></div><button className="icon-only" onClick={onClose}><Icon name="close" /></button></header>{error && <div className="error-box"><Icon name="warning" />{error}</div>}<section><div className="secretary-drawer-title"><h3>Goals</h3><span>{detail.goals.length}</span></div><div className="detail-goals">{detail.goals.map((goal) => <article key={goal.id}><div><span className={`goal-status ${goal.status.toLowerCase()}`}>{statusLabels[goal.status]}</span><small>{autonomyLabels[goal.autonomy]}</small></div><h4>{goal.title}</h4><p>{goal.desiredOutcome}</p>{goal.stateReason && <em><Icon name="warning" size={14} />{goal.stateReason}</em>}<footer>{goal.status === "ACTIVE" && <button onClick={() => void goalAction(goal, "pause")}>暫停</button>}{["WAITING", "BLOCKED"].includes(goal.status) && <button onClick={() => void goalAction(goal, "resume")}>恢復</button>}{!["COMPLETED", "CANCELLED"].includes(goal.status) && <button className="danger-link" onClick={() => void goalAction(goal, "cancel")}>取消</button>}</footer></article>)}</div></section><section><div className="secretary-drawer-title"><h3>Commitment Ledger</h3><button onClick={() => setCommitmentOpen(true)} disabled={!detail.goals.length}>＋ 新增承諾</button></div>{detail.commitments.length ? <div className="commitment-list">{detail.commitments.map((item) => <article key={item.id}><span className={`commitment-owner ${item.owner.toLowerCase()}`}>{item.owner === "USER" ? "使用者" : item.owner === "AGENT_OS" ? "Agent-OS" : "外部對象"}</span><div><strong>{item.promise}</strong><small>{item.dueAt ? `到期：${formatDate(item.dueAt)}` : "未設定到期時間"}</small></div><b>{item.status}</b>{["OPEN", "WAITING", "BROKEN"].includes(item.status) && <div><button onClick={() => void commitmentAction(item.id, "fulfill")}>完成</button><button onClick={() => void commitmentAction(item.id, "cancel")}>取消</button></div>}</article>)}</div> : <EmptySection text="尚未建立承諾" />}</section><section><div className="secretary-drawer-title"><h3>Timeline</h3><span>{detail.timeline.length}</span></div><div className="secretary-timeline">{detail.timeline.map((event) => <div key={event.id}><i /><span><strong>{event.type}</strong><small>{formatDate(event.occurredAt)}・{event.actor}</small></span></div>)}</div></section><section><div className="secretary-drawer-title"><h3>Artifacts</h3><span>{detail.artifacts.length}</span></div>{detail.artifacts.length ? detail.artifacts.map((artifact) => <a className="secretary-artifact" href={artifact.uri} key={artifact.id}><Icon name="storage" /><span><strong>{artifact.kind}</strong><small>{artifact.uri}</small></span></a>) : <EmptySection text="尚無 Artifact reference" />}</section></>}{commitmentOpen && detail && <CommitmentDialog detail={detail} client={client} onClose={() => setCommitmentOpen(false)} onCreated={async () => { await Promise.all([load(), onChanged()]); }} />}</aside></div>;
 }
 
+function contractList(items: string[], empty: string) {
+  return items.length ? <ul>{items.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul> : <p>{empty}</p>;
+}
+
+function scheduleLabel(automation: AutomationRecord): string {
+  return automation.schedule.kind === "ONCE"
+    ? `單次・${formatDate(automation.schedule.at)}`
+    : `每 ${Math.round(automation.schedule.everySeconds / 60)} 分鐘・起始 ${formatDate(automation.schedule.startAt)}`;
+}
+
+function GoalDrawer({ goalId, automations, client, onClose, onChanged }: {
+  goalId: string;
+  automations: AutomationRecord[];
+  client: AgentClient;
+  onClose: () => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [detail, setDetail] = useState<GoalDetail>();
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = async () => {
+    try { setDetail(await client.goalDetail(goalId)); setError(""); }
+    catch (cause) { setError(errorMessage(cause)); }
+  };
+  useEffect(() => { setDetail(undefined); void load(); }, [goalId]);
+  const act = async (action: "pause" | "resume" | "cancel") => {
+    if (!detail || (action === "cancel" && !window.confirm(`確定取消「${detail.goal.title}」？`))) return;
+    setBusy(true);
+    try { await client.goalAction(goalId, action); await Promise.all([load(), onChanged()]); }
+    catch (cause) { setError(errorMessage(cause)); }
+    finally { setBusy(false); }
+  };
+  const relatedAutomations = automations.filter((item) => item.goalId === goalId);
+  const activePlan = detail?.plans.find((plan) => plan.status === "ACTIVE") ?? detail?.plans[0];
+  return <div className="secretary-drawer-layer" role="presentation" onMouseDown={onClose}><aside className="secretary-drawer goal-detail-drawer" onMouseDown={(event) => event.stopPropagation()}>{!detail ? <div className="secretary-loading"><span className="loader" />{error || "讀取 Goal 詳細資料…"}</div> : <>
+    <header><div><div className="goal-detail-status"><span className={`goal-status ${detail.goal.status.toLowerCase()}`}>{statusLabels[detail.goal.status]}</span><span>Contract v{detail.goal.currentVersion}</span></div><h2>{detail.goal.title}</h2><p>{detail.goal.desiredOutcome}</p></div><button className="icon-only" onClick={onClose}><Icon name="close" /></button></header>
+    {error && <div className="error-box"><Icon name="warning" />{error}</div>}
+    <section className="goal-detail-overview"><div><span>優先順序</span><strong>{priorityLabel(detail.goal)}</strong></div><div><span>自主程度</span><strong>{autonomyLabels[detail.goal.autonomy]}</strong></div><div><span>截止時間</span><strong>{formatDate(detail.goal.contract.deadline)}</strong></div><div><span>更新時間</span><strong>{formatDate(detail.goal.updatedAt)}</strong></div></section>
+    {detail.goal.stateReason && <div className="goal-state-reason"><Icon name="warning" size={16} /><span><strong>目前狀態說明</strong>{detail.goal.stateReason}</span></div>}
+    <section><div className="secretary-drawer-title"><h3>Responsibility Contract</h3><span>v{detail.goal.currentVersion}</span></div><div className="contract-grid"><article><h4>Agent 承諾</h4>{contractList(detail.goal.contract.agentCommitment, "沒有額外承諾")}</article><article><h4>完成條件</h4>{contractList(detail.goal.contract.completionCriteria, "沒有完成條件")}</article><article><h4>取消條件</h4>{contractList(detail.goal.contract.cancellationCriteria, "沒有取消條件")}</article><article><h4>外部依賴</h4>{contractList(detail.goal.contract.externalDependencies, "沒有外部依賴")}</article></div></section>
+    <section><div className="secretary-drawer-title"><h3>Plan 與 Tasks</h3><span>{detail.tasks.length} Tasks</span></div>{activePlan && <div className="active-plan-summary"><span>Plan v{activePlan.version}</span><strong>{activePlan.status}</strong><small>{Array.isArray(activePlan.plan.nodes) ? activePlan.plan.nodes.length : 0} 個節點・建立於 {formatDate(activePlan.createdAt)}</small></div>}{detail.tasks.length ? <div className="goal-task-list">{detail.tasks.map((task, index) => {
+      const criteria = Array.isArray(task.specification.completionCriteria) ? task.specification.completionCriteria.filter((item): item is string => typeof item === "string") : [];
+      const budget = task.specification.budget as Record<string, unknown> | undefined;
+      const result = task.result && typeof task.result === "object" ? task.result as Record<string, unknown> : undefined;
+      return <article key={task.id}><div className="goal-task-index">{index + 1}</div><div><header><span>{task.kind}</span><b>{task.status}</b></header><h4>{task.title}</h4>{contractList(criteria, "未提供節點完成條件")}{budget && <small>預算：{String(budget.maxTokens ?? "—")} tokens・{String(budget.maxDurationMs ?? "—")} ms・最多 {String(budget.maxAttempts ?? "—")} 次</small>}{result && <div className="task-result"><strong>執行結果</strong><p>{typeof result.summary === "string" ? result.summary : JSON.stringify(result)}</p></div>}</div></article>;
+    })}</div> : <EmptySection text="這個 Goal 尚未建立 Task" />}</section>
+    <section><div className="secretary-drawer-title"><h3>排程與 Wake</h3><span>{relatedAutomations.length} Automations・{detail.wakes.length} Wakes</span></div>{relatedAutomations.length ? <div className="goal-automation-list">{relatedAutomations.map((automation) => <article key={automation.id}><span className={`automation-mode ${automation.executionMode === "AI_EXECUTION" ? "ai" : "code"}`}><Icon name={automation.executionMode === "AI_EXECUTION" ? "model" : "activity"} /></span><div><strong>{automation.executionMode}</strong><p>{scheduleLabel(automation)}</p><small>{automation.status}・{automation.timezone}</small></div></article>)}</div> : <EmptySection text="這個 Goal 沒有自動排程" />}{detail.wakes.length > 0 && <div className="goal-wake-list">{detail.wakes.map((wake) => <div key={wake.id}><span>{wake.type}</span><strong>{wake.status}</strong><small>{wake.dueAt ? formatDate(wake.dueAt) : "事件觸發"}</small></div>)}</div>}</section>
+    <section><div className="secretary-drawer-title"><h3>Timeline</h3><span>{detail.timeline.length}</span></div><div className="secretary-timeline">{detail.timeline.map((event) => <div key={event.id}><i /><span><strong>{event.type}</strong><small>{formatDate(event.occurredAt)}・{event.actor}</small></span></div>)}</div></section>
+    <footer className="goal-detail-actions">{detail.goal.status === "ACTIVE" && <button className="secondary" disabled={busy} onClick={() => void act("pause")}>暫停 Goal</button>}{["WAITING", "BLOCKED"].includes(detail.goal.status) && <button className="primary" disabled={busy} onClick={() => void act("resume")}>恢復 Goal</button>}{!["COMPLETED", "CANCELLED"].includes(detail.goal.status) && <button className="danger-link" disabled={busy} onClick={() => void act("cancel")}>取消 Goal</button>}</footer>
+  </>}</aside></div>;
+}
+
 export function SecretaryOverview({
   name,
   snapshot,
   projects,
+  automations,
   client,
   onChanged,
   onChat,
@@ -247,14 +301,16 @@ export function SecretaryOverview({
   name: string;
   snapshot: PortfolioSnapshot;
   projects: ProjectRecord[];
+  automations: AutomationRecord[];
   client: AgentClient;
   onChanged: () => Promise<void>;
   onChat: () => void;
 }) {
   const [createMode, setCreateMode] = useState<"project" | "goal">();
   const [projectId, setProjectId] = useState<string>();
+  const [goalId, setGoalId] = useState<string>();
   const [error, setError] = useState("");
-  const openGoal = (goal: GoalRecord) => { if (goal.projectId) setProjectId(goal.projectId); };
+  const openGoal = (goal: GoalRecord) => setGoalId(goal.id);
   const decide = async (id: string, decision: "APPROVED" | "REJECTED") => {
     try {
       await client.decideApproval(id, decision, decision === "APPROVED" ? "Approved by the owner." : "Rejected by the owner.");
@@ -262,7 +318,7 @@ export function SecretaryOverview({
       setError("");
     } catch (cause) { setError(errorMessage(cause)); }
   };
-  return <div className="secretary-page"><header className="secretary-hero"><div><p className="today-date">{new Intl.DateTimeFormat("zh-TW", { dateStyle: "full" }).format(new Date())}</p><h1>早安，{name}</h1><p>這裡只顯示 Durable Responsibility Store 的真實資料。</p></div><div className="secretary-modes"><button className="primary" onClick={onChat}><Icon name="sparkle" />告訴 Agent-OS</button></div></header>{error && <div className="error-box"><Icon name="warning" />{error}</div>}<div className="secretary-summary"><div><strong>{snapshot.today.length}</strong><span>Today</span></div><div><strong>{snapshot.waitingOnYou.length}</strong><span>Waiting on You</span></div><div><strong>{snapshot.activeProjects.length}</strong><span>Active Projects</span></div><div><strong>{snapshot.commitments.filter((item) => ["OPEN", "WAITING", "BROKEN"].includes(item.status)).length}</strong><span>Open Commitments</span></div></div><div className="secretary-grid"><PortfolioSection title="Today" note="高優先、已到期或今天截止" icon="dashboard" goals={snapshot.today} onOpen={openGoal} /><PortfolioSection title="Waiting on You" note="等待澄清、批准、登入或你的承諾" icon="key" goals={snapshot.waitingOnYou} onOpen={openGoal} /><PortfolioSection title="Waiting on Others" note="等待外部對象或外部條件" icon="globe" goals={snapshot.waitingOnOthers} onOpen={openGoal} /><PortfolioSection title="Upcoming" note="有未來截止時間的責任" icon="update" goals={snapshot.upcoming} onOpen={openGoal} /><DecisionQueue snapshot={snapshot} onOpen={openGoal} onDecide={decide} /><PortfolioSection title="Recently Completed" note="最近驗證完成的 Goal" icon="check" goals={snapshot.recentlyCompleted} onOpen={openGoal} /></div><section className="active-projects-section"><header><div><p className="eyebrow">Portfolio</p><h2>Active Projects</h2></div><button className="secondary" onClick={() => setCreateMode("project")}>＋ 建立 Project</button></header>{snapshot.activeProjects.length ? <div className="active-project-grid">{snapshot.activeProjects.map((project) => <button key={project.id} onClick={() => setProjectId(project.id)}><span><Icon name="storage" /></span><div><h3>{project.name}</h3><p>{project.description || "沒有額外說明"}</p><small>{project.activeGoalCount} Goals・{project.openCommitmentCount} Commitments</small></div><Icon name="chevron" /></button>)}</div> : <EmptySection text="建立第一個 Project，開始管理長期責任" />}</section>{createMode && <CreateDialog mode={createMode} projects={projects} client={client} onClose={() => setCreateMode(undefined)} onCreated={onChanged} />}{projectId && <ProjectDrawer projectId={projectId} client={client} onClose={() => setProjectId(undefined)} onChanged={onChanged} />}</div>;
+  return <div className="secretary-page"><header className="secretary-hero"><div><p className="today-date">{new Intl.DateTimeFormat("zh-TW", { dateStyle: "full" }).format(new Date())}</p><h1>早安，{name}</h1><p>這裡只顯示 Durable Responsibility Store 的真實資料。</p></div><div className="secretary-modes"><button className="primary" onClick={onChat}><Icon name="sparkle" />告訴 Agent-OS</button></div></header>{error && <div className="error-box"><Icon name="warning" />{error}</div>}<div className="secretary-summary"><div><strong>{snapshot.today.length}</strong><span>Today</span></div><div><strong>{snapshot.waitingOnYou.length}</strong><span>Waiting on You</span></div><div><strong>{snapshot.activeProjects.length}</strong><span>Active Projects</span></div><div><strong>{snapshot.commitments.filter((item) => ["OPEN", "WAITING", "BROKEN"].includes(item.status)).length}</strong><span>Open Commitments</span></div></div><div className="secretary-grid"><PortfolioSection title="Today" note="高優先、已到期或今天截止" icon="dashboard" goals={snapshot.today} onOpen={openGoal} /><PortfolioSection title="Waiting on You" note="等待澄清、批准、登入或你的承諾" icon="key" goals={snapshot.waitingOnYou} onOpen={openGoal} /><PortfolioSection title="Waiting on Others" note="等待外部對象或外部條件" icon="globe" goals={snapshot.waitingOnOthers} onOpen={openGoal} /><PortfolioSection title="Upcoming" note="有未來截止時間的責任" icon="update" goals={snapshot.upcoming} onOpen={openGoal} /><DecisionQueue snapshot={snapshot} onOpen={openGoal} onDecide={decide} /><PortfolioSection title="Recently Completed" note="最近驗證完成的 Goal" icon="check" goals={snapshot.recentlyCompleted} onOpen={openGoal} /></div><section className="active-projects-section"><header><div><p className="eyebrow">Portfolio</p><h2>Active Projects</h2></div><button className="secondary" onClick={() => setCreateMode("project")}>＋ 建立 Project</button></header>{snapshot.activeProjects.length ? <div className="active-project-grid">{snapshot.activeProjects.map((project) => <button key={project.id} onClick={() => setProjectId(project.id)}><span><Icon name="storage" /></span><div><h3>{project.name}</h3><p>{project.description || "沒有額外說明"}</p><small>{project.activeGoalCount} Goals・{project.openCommitmentCount} Commitments</small></div><Icon name="chevron" /></button>)}</div> : <EmptySection text="建立第一個 Project，開始管理長期責任" />}</section>{createMode && <CreateDialog mode={createMode} projects={projects} client={client} onClose={() => setCreateMode(undefined)} onCreated={onChanged} />}{projectId && <ProjectDrawer projectId={projectId} client={client} onClose={() => setProjectId(undefined)} onChanged={onChanged} />}{goalId && <GoalDrawer goalId={goalId} automations={automations} client={client} onClose={() => setGoalId(undefined)} onChanged={onChanged} />}</div>;
 }
 
 export function ResponsibilitiesPage({
@@ -282,7 +338,7 @@ export function ResponsibilitiesPage({
 }) {
   const [filter, setFilter] = useState<"OPEN" | "WAITING" | "DONE" | "ALL">("OPEN");
   const [createMode, setCreateMode] = useState<"project" | "goal">();
-  const [projectId, setProjectId] = useState<string>();
+  const [goalId, setGoalId] = useState<string>();
   const visible = useMemo(() => goals.filter((goal) => filter === "ALL"
     || (filter === "DONE" ? ["COMPLETED", "CANCELLED"].includes(goal.status)
       : filter === "WAITING" ? ["CLARIFYING", "WAITING", "WAITING_AUTH", "NEEDS_APPROVAL", "BLOCKED"].includes(goal.status)
@@ -292,5 +348,5 @@ export function ResponsibilitiesPage({
     if (!window.confirm("只取消這個排程？原本的 Goal 會繼續保持有效。")) return;
     try { await client.cancelAutomation(id); await onChanged(); } catch (cause) { window.alert(errorMessage(cause)); }
   };
-  return <div className="responsibilities-page"><header><div><p className="eyebrow">Responsibilities</p><h1>Projects 與 Goals</h1><p>所有內容都直接來自 SQLite Responsibility Kernel。</p></div><div><button className="secondary" onClick={() => setCreateMode("project")}>建立 Project</button><button className="primary" onClick={() => setCreateMode("goal")}>進階建立 Goal</button></div></header><section className="automation-panel"><header><div><p className="eyebrow">Phase 5 Wake Engine</p><h2>AI 選擇的執行方式</h2><p>這裡只顯示 Router 分析後建立的排程；系統沒有預設領域模板。</p></div><span>{automations.filter((item) => item.status === "ACTIVE").length} active</span></header>{automations.length ? <div className="automation-list">{automations.map((automation) => { const goal = goals.find((item) => item.id === automation.goalId); return <article key={automation.id}><span className={`automation-mode ${automation.executionMode === "AI_EXECUTION" ? "ai" : "code"}`}><Icon name={automation.executionMode === "AI_EXECUTION" ? "model" : "activity"} /></span><div><div><strong>{goal?.title ?? "Goal"}</strong><small>{automation.status}</small></div><p>{automation.executionMode === "AI_EXECUTION" ? "複雜任務：到期時交給 AI Runtime 分析" : `簡易任務：${automation.capabilityId ? capabilityNames.get(automation.capabilityId) ?? "Generated Capability" : "Generated Capability"}`}</p><small>{automation.schedule.kind === "ONCE" ? `單次・${formatDate(automation.schedule.at)}` : `每 ${Math.round(automation.schedule.everySeconds / 60)} 分鐘・${automation.misfirePolicy}`}・{automation.timezone}</small></div>{automation.status === "ACTIVE" && <button className="secondary" onClick={() => void cancelAutomation(automation.id)}>取消排程</button>}</article>; })}</div> : <EmptySection text="尚無排程；AI Router 判定適合時才會建立" />}</section><div className="responsibility-filters">{(["OPEN", "WAITING", "DONE", "ALL"] as const).map((value) => <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "OPEN" ? "進行中" : value === "WAITING" ? "等待／受阻" : value === "DONE" ? "已結束" : "全部"}<span>{value === "ALL" ? goals.length : undefined}</span></button>)}</div>{visible.length ? <div className="responsibility-list">{visible.map((goal) => <GoalCard key={goal.id} goal={goal} onOpen={(item) => { if (item.projectId) setProjectId(item.projectId); }} />)}</div> : <EmptySection text="這個分類目前沒有 Goal" />}{createMode && <CreateDialog mode={createMode} projects={projects} client={client} onClose={() => setCreateMode(undefined)} onCreated={onChanged} />}{projectId && <ProjectDrawer projectId={projectId} client={client} onClose={() => setProjectId(undefined)} onChanged={onChanged} />}</div>;
+  return <div className="responsibilities-page"><header><div><p className="eyebrow">Responsibilities</p><h1>Projects 與 Goals</h1><p>所有內容都直接來自 SQLite Responsibility Kernel。</p></div><div><button className="secondary" onClick={() => setCreateMode("project")}>建立 Project</button><button className="primary" onClick={() => setCreateMode("goal")}>進階建立 Goal</button></div></header><section className="automation-panel"><header><div><p className="eyebrow">Phase 5 Wake Engine</p><h2>AI 選擇的執行方式</h2><p>這裡只顯示 Router 分析後建立的排程；系統沒有預設領域模板。</p></div><span>{automations.filter((item) => item.status === "ACTIVE").length} active</span></header>{automations.length ? <div className="automation-list">{automations.map((automation) => { const goal = goals.find((item) => item.id === automation.goalId); return <article key={automation.id}><span className={`automation-mode ${automation.executionMode === "AI_EXECUTION" ? "ai" : "code"}`}><Icon name={automation.executionMode === "AI_EXECUTION" ? "model" : "activity"} /></span><div><div><strong>{goal?.title ?? "Goal"}</strong><small>{automation.status}</small></div><p>{automation.executionMode === "AI_EXECUTION" ? "複雜任務：到期時交給 AI Runtime 分析" : `簡易任務：${automation.capabilityId ? capabilityNames.get(automation.capabilityId) ?? "Generated Capability" : "Generated Capability"}`}</p><small>{automation.schedule.kind === "ONCE" ? `單次・${formatDate(automation.schedule.at)}` : `每 ${Math.round(automation.schedule.everySeconds / 60)} 分鐘・${automation.misfirePolicy}`}・{automation.timezone}</small></div>{automation.status === "ACTIVE" && <button className="secondary" onClick={() => void cancelAutomation(automation.id)}>取消排程</button>}</article>; })}</div> : <EmptySection text="尚無排程；AI Router 判定適合時才會建立" />}</section><div className="responsibility-filters">{(["OPEN", "WAITING", "DONE", "ALL"] as const).map((value) => <button className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "OPEN" ? "進行中" : value === "WAITING" ? "等待／受阻" : value === "DONE" ? "已結束" : "全部"}<span>{value === "ALL" ? goals.length : undefined}</span></button>)}</div>{visible.length ? <div className="responsibility-list">{visible.map((goal) => <GoalCard key={goal.id} goal={goal} onOpen={(item) => setGoalId(item.id)} />)}</div> : <EmptySection text="這個分類目前沒有 Goal" />}{createMode && <CreateDialog mode={createMode} projects={projects} client={client} onClose={() => setCreateMode(undefined)} onCreated={onChanged} />}{goalId && <GoalDrawer goalId={goalId} automations={automations} client={client} onClose={() => setGoalId(undefined)} onChanged={onChanged} />}</div>;
 }

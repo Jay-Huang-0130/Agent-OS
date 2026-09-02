@@ -94,6 +94,19 @@ describe("AgentClient", () => {
     expect(headers.get("idempotency-key")).toBeTruthy();
   });
 
+  it("loads the complete Goal detail used by the clickable Goal drawer", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      goal: { id: "goal-1", title: "AI Goal" }, plans: [{ id: "plan-1" }],
+      tasks: [{ id: "task-1" }], wakes: [], timeline: [],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const detail = await new AgentClient().goalDetail("goal/1");
+
+    expect(detail.tasks[0]?.id).toBe("task-1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/goals/goal%2F1/detail", expect.any(Object));
+  });
+
   it("sends unclassified natural language through the unified assistant intake", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
