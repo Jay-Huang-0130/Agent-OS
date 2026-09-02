@@ -82,19 +82,26 @@ test("Goal Compiler converts strict JSON-string metadata into a versioned Respon
 });
 
 test("Goal Compiler normalizes an incomplete automationJson for a relative reminder instead of failing", async () => {
+  const timerRoute = await new Phase6RequestRouter(new FakeRuntime([])).route({
+    requestId: "timer-route", ownerUserId: "owner", message: "可以幫我計時30秒嗎",
+  });
+  assert.equal(timerRoute.executionMode, "DETERMINISTIC_AUTOMATION");
   const runtime = new FakeRuntime([{
     title: "十秒提醒", desiredOutcome: "十秒後提醒使用者。", agentCommitment: ["按時提醒"],
     completionCriteria: ["提醒已送出"], cancellationCriteria: [], externalDependencies: [], deadline: null,
     constraintsJson: "{}", priorityJson: "{}", attentionPolicyJson: "{}", budgetJson: "{}", autonomy: "ACT_WITHIN_POLICY",
     plan: { version: 1, nodes: [{ id: "remind", title: "送出提醒", kind: "NOTIFY", dependsOn: [],
-      completionCriteria: ["提醒已送出"], allowedTools: [], maxTokens: 500, maxDurationMs: 30_000, maxAttempts: 2 }] },
+      completionCriteria: ["提醒已送出"], allowedTools: [], maxTokens: 50, maxDurationMs: 500, maxAttempts: 0 }] },
     automationJson: JSON.stringify({ executionMode: "DETERMINISTIC_AUTOMATION", schedule: { kind: "ONCE", at: "later" } }),
   }]);
   const now = new Date("2026-09-01T12:00:00.000Z");
-  const result = await new GoalCompiler(runtime).compile({ ownerUserId: "owner", requestId: "reminder", message: "10秒後叫我",
+  const result = await new GoalCompiler(runtime).compile({ ownerUserId: "owner", requestId: "reminder", message: "可以幫我計時30秒嗎",
     mode: "DETERMINISTIC_AUTOMATION", conversationContext: "", timezone: "Asia/Taipei", now });
   assert.equal(result.automation?.executionMode, "AI_EXECUTION");
-  assert.deepEqual(result.automation?.schedule, { kind: "ONCE", at: "2026-09-01T12:00:10.000Z" });
+  assert.deepEqual(result.automation?.schedule, { kind: "ONCE", at: "2026-09-01T12:00:30.000Z" });
+  assert.equal(result.plan.nodes[0]?.maxTokens, 100);
+  assert.equal(result.plan.nodes[0]?.maxDurationMs, 1_000);
+  assert.equal(result.plan.nodes[0]?.maxAttempts, 1);
 });
 
 test("Plan Runtime persists versioned Plan IR and manager receives envelopes instead of worker transcripts", () => {

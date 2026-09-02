@@ -49,11 +49,11 @@ done
 
 grep -q 'agent-webctl info' scripts/install-agent-web.sh
 grep -q 'READY' scripts/install-agent-web.sh
-grep -q 'OPENAI_OAUTH_BROWSER_AVAILABLE' scripts/install-agent-web.sh
-grep -q '/run/agent-web-oauth/open.sock' apps/gateway/src/agentWeb.ts
 grep -q -- '--non-interactive' scripts/install-agent-web.sh
 grep -q -- '--password-file' scripts/install-agent-web.sh
 grep -q 'AGENT_OS_AGENT_WEB_PASSWORD_FILE' docs/AGENT-WEB-INTEGRATION.md
+grep -q 'class CodexAuthBridge' apps/gateway/src/codexAuth.ts
+grep -q 'model/list' apps/gateway/src/codexAuth.ts
 grep -q 'AGENT_OS_NODE_VERSION:=24.20.0' config/release.env
 grep -q '3515603e2487879a39bc75716f1a2affd027500c64ba50e845cf72cb33219013' scripts/install-node-runtime.sh
 grep -q '855d581f8a4eb1a8117e3426de25fe02770592febcfb31369aee1ffbfee9e8ec' scripts/install-node-runtime.sh
@@ -85,4 +85,4 @@ if command -v npm >/dev/null 2>&1 && [[ -d node_modules ]]; then
     npm run typecheck
 fi
 
-echo "Agent-OS Phase 0-5 validation passed."
+echo "Agent-OS Phase 0-6 validation passed."

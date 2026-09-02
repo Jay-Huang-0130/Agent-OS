@@ -88,7 +88,10 @@ const compiledGoalJsonSchema: Record<string, unknown> = {
         required: ["id", "title", "kind", "dependsOn", "completionCriteria", "allowedTools", "maxTokens", "maxDurationMs", "maxAttempts"],
         properties: { id: { type: "string" }, title: { type: "string" }, kind: { type: "string", enum: ["ACTION", "ANALYSIS", "VERIFY", "WAIT", "NOTIFY"] },
           dependsOn: { type: "array", items: { type: "string" } }, completionCriteria: { type: "array", items: { type: "string" } },
-          allowedTools: { type: "array", items: { type: "string" } }, maxTokens: { type: "integer" }, maxDurationMs: { type: "integer" }, maxAttempts: { type: "integer" } } } } } },
+          allowedTools: { type: "array", items: { type: "string" } },
+          maxTokens: { type: "integer", minimum: 100, maximum: 100_000 },
+          maxDurationMs: { type: "integer", minimum: 1_000, maximum: 3_600_000 },
+          maxAttempts: { type: "integer", minimum: 1, maximum: 10 } } } } } },
     automationJson: { type: "string" },
   },
 };
@@ -128,7 +131,7 @@ function knownRoute(message: string): RouterResult | undefined {
   const highRisk = /(刪除|匯款|付款|購買|下單|發送給所有|delete|transfer money|purchase)/iu.test(text);
   if (highRisk) return { state: "NEEDS_CLARIFICATION", executionMode: "BOUNDED_AGENT", confidence: 0.99,
     reason: "這個要求可能產生不可逆或高風險操作；請確認目標、範圍與授權界線。", requiresClarification: true };
-  const scheduled = /(每天|每週|每月|每小時|定期|排程|提醒我|叫我|\d+\s*(?:秒|分鐘|分|小時)\s*後|daily|weekly|monthly|every\s+\d+)/iu.test(text);
+  const scheduled = /(每天|每週|每月|每小時|定期|排程|提醒我|叫我|計時|倒數|\d+\s*(?:秒|分鐘|分|小時)\s*後|daily|weekly|monthly|timer|countdown|every\s+\d+)/iu.test(text);
   const watching = /(有變化|變更時|更新時|價格低於|庫存|監看|監控|watch|when .*changes?|notify .*when)/iu.test(text);
   if (watching) return { state: "ROUTED", executionMode: "CHANGE_WATCHER", confidence: 0.94,
     reason: "要求以外部狀態變化作為觸發條件。", requiresClarification: false };
@@ -188,12 +191,35 @@ function parseCompiledGoal(value: unknown, fallback: { message: string; timezone
     externalDependencies: raw.externalDependencies, deadline: raw.deadline,
     constraints: objectJson(raw.constraintsJson, "constraintsJson"), priority: objectJson(raw.priorityJson, "priorityJson"),
     attentionPolicy: objectJson(raw.attentionPolicyJson, "attentionPolicyJson"), budget: objectJson(raw.budgetJson, "budgetJson"),
-    autonomy: raw.autonomy, plan: raw.plan, automation,
+    autonomy: raw.autonomy, plan: normalizePlan(raw.plan), automation,
   });
 }
 
+function normalizePlan(value: unknown) {
+  const rawPlan = z.object({
+    version: z.literal(1),
+    nodes: z.array(planNodeSchema.extend({
+      maxTokens: z.number().finite(),
+      maxDurationMs: z.number().finite(),
+      maxAttempts: z.number().finite(),
+    })).min(1).max(50),
+  }).strict().parse(value);
+  const boundedInteger = (raw: number, minimum: number, maximum: number) =>
+    Math.max(minimum, Math.min(maximum, Math.round(raw)));
+  return {
+    version: rawPlan.version,
+    nodes: rawPlan.nodes.map((node) => ({
+      ...node,
+      maxTokens: boundedInteger(node.maxTokens, 100, 100_000),
+      maxDurationMs: boundedInteger(node.maxDurationMs, 1_000, 3_600_000),
+      maxAttempts: boundedInteger(node.maxAttempts, 1, 10),
+    })),
+  };
+}
+
 function relativeDelayMs(message: string): number | null {
-  const match = message.match(/(\d+)\s*(秒|分鐘|分|小時|seconds?|minutes?|hours?)\s*(?:後|later)/iu);
+  const match = message.match(/(\d+)\s*(秒|分鐘|分|小時|seconds?|minutes?|hours?)\s*(?:後|later)/iu)
+    ?? message.match(/(?:計時|倒數|timer(?:\s+for)?|countdown(?:\s+for)?)\s*(\d+)\s*(秒|分鐘|分|小時|seconds?|minutes?|hours?)/iu);
   if (!match) return null;
   const amount = Number(match[1]);
   const unit = match[2]?.toLowerCase();
