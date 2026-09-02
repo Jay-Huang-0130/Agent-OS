@@ -72,7 +72,7 @@ test("migration upgrades a pre-migration Phase 0–2 database without losing own
 
   const upgraded = new AgentDatabase(path);
   assert.equal(upgraded.getOwner()?.displayName, "Legacy Owner");
-  assert.deepEqual(upgraded.migrationVersions(), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(upgraded.migrationVersions(), [1, 2, 3, 4, 5, 6, 7]);
   const tables = upgraded.db.prepare(`SELECT name FROM sqlite_schema
     WHERE type = 'table' AND name IN ('projects', 'goals', 'events', 'outbox') ORDER BY name`).all() as Array<{
     name: string;
@@ -86,12 +86,12 @@ test("Phase 3 migration is repeatable and preserves durable Goal state", () => {
   database.addActivity("system", "Before restart", "Baseline data must survive.");
   const project = kernel.createProject(owner.id, { name: "Agent-OS" }, "project-1");
   const goal = kernel.createGoal(owner.id, goalInput(project.id), "goal-1");
-  assert.deepEqual(database.migrationVersions(), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(database.migrationVersions(), [1, 2, 3, 4, 5, 6, 7]);
   database.close();
 
   const reopened = new AgentDatabase(path);
   const restartedKernel = new ResponsibilityKernel(reopened);
-  assert.deepEqual(reopened.migrationVersions(), [1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(reopened.migrationVersions(), [1, 2, 3, 4, 5, 6, 7]);
   assert.equal(reopened.listActivity()[0]?.title, "Before restart");
   assert.equal(restartedKernel.getGoal(goal.id, owner.id).status, "ACTIVE");
   assert.equal(restartedKernel.getGoal(goal.id, owner.id).contract.completionCriteria.length, 1);

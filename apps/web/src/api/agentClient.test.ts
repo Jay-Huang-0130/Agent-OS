@@ -97,7 +97,7 @@ describe("AgentClient", () => {
   it("loads the complete Goal detail used by the clickable Goal drawer", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       goal: { id: "goal-1", title: "AI Goal" }, plans: [{ id: "plan-1" }],
-      tasks: [{ id: "task-1" }], wakes: [], timeline: [],
+      tasks: [{ id: "task-1" }], wakes: [], timeline: [], watchers: [],
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -118,6 +118,21 @@ describe("AgentClient", () => {
 
     expect(records.tasks[0]?.id).toBe("task-real");
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/records", expect.any(Object));
+  });
+
+  it("loads and manually checks Phase 7 watchers through real endpoints", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "watcher-1", status: "ACTIVE" }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "observation-1", status: "UNCHANGED" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentClient();
+
+    const watchers = await client.watchers();
+    const observation = await client.checkWatcher("watcher/1");
+
+    expect(watchers[0]?.id).toBe("watcher-1");
+    expect(observation.status).toBe("UNCHANGED");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/watchers/watcher%2F1/check");
   });
 
   it("sends unclassified natural language through the unified assistant intake", async () => {

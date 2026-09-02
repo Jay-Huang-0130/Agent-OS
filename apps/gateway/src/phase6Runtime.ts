@@ -152,7 +152,7 @@ export class GoalCompiler {
       purpose: "GOAL_COMPILER", ownerUserId: input.ownerUserId, requestId: input.requestId,
       ...(input.model ? { model: input.model } : {}),
       instructions: `Compile a versioned Responsibility Contract and bounded Plan IR. Requested execution mode: ${input.mode}.
-For a fixed schedule, generate a LOW-risk Python JSON capability only when the work is short, deterministic, testable and needs no judgment. Otherwise choose AI_EXECUTION. Never invent credentials. Every node needs measurable completion criteria and hard budgets.`,
+For a fixed schedule, generate a LOW-risk Python JSON capability only when the work is short, deterministic, testable and needs no judgment. Otherwise choose AI_EXECUTION. For CHANGE_WATCHER or HYBRID_GOAL with a concrete public HTTP source, put sourceUrl, intervalSeconds, semanticReview and optional endAt in constraints; do not invent a URL. Never invent credentials. Every node needs measurable completion criteria and hard budgets.`,
       input: `Current time: ${now.toISOString()}\nTimezone: ${input.timezone}\n${input.conversationContext ? `Conversation so far:\n${input.conversationContext}\n` : ""}Latest user message: ${input.message}\n\nReturn constraintsJson, priorityJson, attentionPolicyJson and budgetJson as JSON object strings. Return automationJson as an empty string when no schedule is needed, otherwise as JSON matching the automation proposal contract.`,
       outputSchema: compiledGoalJsonSchema,
       parse: (value) => parseCompiledGoal(value, { message: input.message, timezone: input.timezone, now }), timeoutMs: 90_000,
@@ -282,6 +282,8 @@ export class Phase6AssistantExecutor implements AssistantExecution {
     private readonly capabilities: CapabilityService, private readonly automations: AutomationService,
     private readonly getTimezone: () => string,
     private readonly enqueueImmediate?: (ownerUserId: string, goalId: string) => void,
+    private readonly createWatcher?: (input: { ownerUserId: string; requestId: string; message: string; model?: string;
+      mode: ExecutionMode; compiled: CompiledGoal; goalId: string }) => { id: string } | undefined,
     private readonly emit?: ((event: { type: string; data: Record<string, unknown> }) => void),
   ) { this.compiler = new GoalCompiler(runtime); this.plans = new PlanRuntime(kernel); }
 
@@ -301,6 +303,10 @@ export class Phase6AssistantExecutor implements AssistantExecution {
       message: input.message, mode: input.route.executionMode, ...(input.model ? { model: input.model } : {}),
       conversationContext: input.conversationContext, timezone: this.getTimezone() });
     const materialized = this.plans.materialize(input.ownerUserId, input.requestId, compiled, input.model);
+    const watcher = ["CHANGE_WATCHER", "HYBRID_GOAL"].includes(input.route.executionMode ?? "")
+      ? this.createWatcher?.({ ownerUserId: input.ownerUserId, requestId: input.requestId, message: input.message,
+        ...(input.model ? { model: input.model } : {}), mode: input.route.executionMode as ExecutionMode, compiled, goalId: materialized.goal.id })
+      : undefined;
     let automation: AutomationRecord | undefined;
     if (compiled.automation) {
       let capabilityId: string | undefined;
@@ -320,9 +326,11 @@ export class Phase6AssistantExecutor implements AssistantExecution {
         notificationTemplate: compiled.automation.notificationTemplate, misfirePolicy: "RUN_LATEST_ONLY",
       }, `assistant:${input.requestId}:automation`);
     }
-    if (!automation) this.enqueueImmediate?.(input.ownerUserId, materialized.goal.id);
+    if (!automation && !watcher) this.enqueueImmediate?.(input.ownerUserId, materialized.goal.id);
     return { goalId: materialized.goal.id,
-      assistantMessage: automation
+      assistantMessage: watcher
+        ? `已建立「${materialized.goal.title}」與可跨重啟的 Watcher；未變更時不呼叫模型也不通知，偵測到 Delta 才回報。`
+        : automation
         ? `已建立「${materialized.goal.title}」與版本 1 計畫，並安排 ${automation.executionMode === "DETERMINISTIC_AUTOMATION" ? "0-token Capability" : "AI 執行"}。`
         : `已建立「${materialized.goal.title}」與版本 1 計畫，共 ${materialized.tasks.length} 個受限任務，已交給背景 Worker 依序執行。` };
   }
@@ -487,7 +495,8 @@ export class ImmediatePlanRunner {
     const rows = this.database.db.prepare(`SELECT DISTINCT g.id, g.owner_user_id FROM goals g
       JOIN tasks t ON t.goal_id = g.id
       WHERE g.status = 'ACTIVE' AND t.status IN ('PENDING', 'READY')
-      AND NOT EXISTS (SELECT 1 FROM automations a WHERE a.goal_id = g.id)`)
+      AND NOT EXISTS (SELECT 1 FROM automations a WHERE a.goal_id = g.id)
+      AND NOT EXISTS (SELECT 1 FROM watchers w WHERE w.goal_id = g.id AND w.status = 'ACTIVE')`)
       .all() as Array<Record<string, unknown>>;
     for (const row of rows) {
       const goalId = String(row.id);

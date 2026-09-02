@@ -22,6 +22,7 @@ import { CodexAuthBridge, type OpenAIAuthService } from "./codexAuth.js";
 import { AgentDatabase, type ActivityRecord } from "./database.js";
 import { ModelRuntimeError, TrackedModelRuntime, type ModelRuntime } from "./modelRuntime.js";
 import { ImmediatePlanRunner, ModelAiWakeExecutor, Phase6AssistantExecutor, Phase6RequestRouter } from "./phase6Runtime.js";
+import { WatcherError, WatcherService, type WatcherFetcher } from "./phase7Runtime.js";
 import { collectSystemStatus } from "./metrics.js";
 import {
   autonomyLevels,
@@ -95,6 +96,15 @@ const createAutomationSchema = z.object({
   timezone: z.string().trim().min(1).max(100),
   notificationTemplate: z.string().max(8_000).optional(),
   misfirePolicy: z.enum(misfirePolicies),
+}).strict();
+const createWatcherSchema = z.object({
+  goalId: z.string().uuid(),
+  sourceUrl: z.string().url().max(4_000),
+  intervalSeconds: z.number().int().min(60).max(604_800),
+  semanticReview: z.boolean().optional(),
+  selectedModel: z.string().trim().min(1).max(160).optional(),
+  modelTokenBudget: z.number().int().min(0).max(1_000_000).optional(),
+  endAt: z.string().datetime({ offset: true }).optional(),
 }).strict();
 const cancelProviderLoginSchema = z.object({ loginId: z.string().uuid() }).strict();
 const createProjectSchema = z.object({
@@ -180,8 +190,10 @@ export interface BuildAppOptions {
   capabilityExecutor?: CapabilityExecutor;
   aiWakeExecutor?: AiWakeExecutor;
   wakeEngine?: Omit<WakeEngineOptions, "notify" | "aiExecutor">;
+  watcherFetcher?: WatcherFetcher;
   startWakeEngine?: boolean;
   startPlanRunner?: boolean;
+  startWatcherEngine?: boolean;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -202,6 +214,12 @@ function kernelApiError(reply: FastifyReply, error: unknown) {
 function phase5ApiError(reply: FastifyReply, error: unknown) {
   if (!(error instanceof Phase5Error)) throw error;
   const status = error.code === "not_found" ? 404 : error.code === "approval_required" ? 403 : 422;
+  return apiError(reply, status, error.code, error.message);
+}
+
+function watcherApiError(reply: FastifyReply, error: unknown) {
+  if (!(error instanceof WatcherError)) throw error;
+  const status = error.code === "not_found" ? 404 : error.code === "conflict" ? 409 : 422;
   return apiError(reply, status, error.code, error.message);
 }
 
@@ -318,6 +336,10 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     ? openAIAuth as OpenAIAuthService & ModelRuntime : undefined;
   const rawModelRuntime = options.modelRuntime ?? authRuntime;
   const modelRuntime = rawModelRuntime ? new TrackedModelRuntime(database, rawModelRuntime) : undefined;
+  const watcherService = new WatcherService(database, kernel, options.watcherFetcher, modelRuntime,
+    (item) => broadcast({ type: "notification.created", data: item }));
+  const watcherEngineEnabled = options.startWatcherEngine ?? options.startWakeEngine !== false;
+  if (watcherEngineEnabled) watcherService.start();
   const requestRouter = options.requestRouter ?? (modelRuntime ? new Phase6RequestRouter(modelRuntime) : undefined);
   const planRunner = modelRuntime ? new ImmediatePlanRunner(database, kernel, modelRuntime,
     (event) => broadcast(event)) : undefined;
@@ -327,6 +349,21 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     ? new Phase6AssistantExecutor(modelRuntime, kernel, capabilityService, automationService,
       () => database.getSettings(settingsDefaults()).timezone,
       planRunnerEnabled ? (ownerUserId, goalId) => planRunner?.enqueue(ownerUserId, goalId) : undefined,
+      ({ ownerUserId, requestId, message, model, compiled, goalId }) => {
+        const configuredUrl = typeof compiled.constraints.sourceUrl === "string" ? compiled.constraints.sourceUrl : undefined;
+        const messageUrl = message.match(/https?:\/\/[^\s<>"']+/iu)?.[0]?.replace(/[),.，。]+$/u, "");
+        const sourceUrl = configuredUrl ?? messageUrl;
+        if (!sourceUrl) return undefined;
+        const interval = Number(compiled.constraints.intervalSeconds ?? 3_600);
+        const semanticReview = compiled.constraints.semanticReview !== false;
+        const tokenBudget = Number(compiled.budget.watcherMaxTokens ?? compiled.budget.maxTokens ?? 20_000);
+        const watcher = watcherService.create(ownerUserId, { goalId, sourceUrl,
+          intervalSeconds: Number.isFinite(interval) ? interval : 3_600, semanticReview,
+          ...(model ? { selectedModel: model } : {}), modelTokenBudget: Number.isFinite(tokenBudget) ? tokenBudget : 20_000,
+          ...(compiled.deadline ? { endAt: compiled.deadline } : {}) }, `assistant:${requestId}:watcher`);
+        broadcast({ type: "watcher.created", data: watcher });
+        return watcher;
+      },
       (event) => broadcast(event))
     : undefined;
   const assistantIntake = requestRouter
@@ -470,6 +507,31 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     return database.listActivity(30).map(activityForApi);
   });
 
+  app.get("/api/v1/notifications", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const rows = database.db.prepare(`SELECT * FROM watcher_notifications WHERE owner_user_id = ?
+      ORDER BY created_at DESC LIMIT 200`).all(session.userId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ id: String(row.id), title: String(row.title), detail: String(row.body), kind: "task",
+      createdAt: String(row.created_at), read: row.read_at !== null, goalId: String(row.goal_id), watcherId: String(row.watcher_id) }));
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/notifications/:id/read", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    database.db.prepare(`UPDATE watcher_notifications SET read_at = COALESCE(read_at, ?)
+      WHERE id = ? AND owner_user_id = ?`).run(new Date().toISOString(), request.params.id, session.userId);
+    return reply.code(204).send();
+  });
+
+  app.post("/api/v1/notifications/read-all", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    database.db.prepare(`UPDATE watcher_notifications SET read_at = COALESCE(read_at, ?)
+      WHERE owner_user_id = ?`).run(new Date().toISOString(), session.userId);
+    return reply.code(204).send();
+  });
+
   app.get("/api/v1/records", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session) return;
@@ -601,6 +663,59 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     return automationService.list(session.userId);
   });
 
+  app.post("/api/v1/watchers", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = createWatcherSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_watcher", "Watcher manifest is invalid.");
+    try {
+      const watcher = watcherService.create(session.userId, {
+        goalId: parsed.data.goalId, sourceUrl: parsed.data.sourceUrl, intervalSeconds: parsed.data.intervalSeconds,
+        ...(parsed.data.semanticReview === undefined ? {} : { semanticReview: parsed.data.semanticReview }),
+        ...(parsed.data.selectedModel ? { selectedModel: parsed.data.selectedModel } : {}),
+        ...(parsed.data.modelTokenBudget === undefined ? {} : { modelTokenBudget: parsed.data.modelTokenBudget }),
+        ...(parsed.data.endAt ? { endAt: parsed.data.endAt } : {}),
+      }, key);
+      broadcast({ type: "watcher.created", data: watcher });
+      return reply.code(201).send(watcher);
+    } catch (error) { return watcherApiError(reply, error); }
+  });
+
+  app.get("/api/v1/watchers", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return watcherService.list(session.userId);
+  });
+
+  app.get<{ Params: { id: string } }>("/api/v1/watchers/:id", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    try { return watcherService.detail(request.params.id, session.userId); }
+    catch (error) { return watcherApiError(reply, error); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/watchers/:id/check", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    try {
+      const observation = await watcherService.runNow(request.params.id, session.userId);
+      broadcast({ type: `watcher.${observation.status.toLowerCase()}`, data: observation });
+      return observation;
+    } catch (error) { return watcherApiError(reply, error); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/watchers/:id/cancel", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    try {
+      const watcher = watcherService.cancel(request.params.id, session.userId);
+      broadcast({ type: "watcher.cancelled", data: watcher });
+      return watcher;
+    } catch (error) { return watcherApiError(reply, error); }
+  });
+
   app.post<{ Params: { id: string } }>("/api/v1/automations/:id/cancel", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
@@ -685,7 +800,8 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     const session = requireSession(request, reply, database);
     if (!session) return;
     try {
-      return kernel.getGoalDetail(request.params.id, session.userId);
+      const detail = kernel.getGoalDetail(request.params.id, session.userId);
+      return { ...detail, watchers: watcherService.list(session.userId).filter((item) => item.goalId === request.params.id) };
     } catch (error) {
       return kernelApiError(reply, error);
     }
@@ -1029,6 +1145,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
 
   app.addHook("onClose", async () => {
     clearInterval(heartbeat);
+    await watcherService.stop();
     await planRunner?.stop();
     await wakeEngine.stop();
     for (const socket of sockets) socket.close(1001, "server shutdown");

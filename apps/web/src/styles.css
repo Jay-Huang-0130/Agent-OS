@@ -1134,6 +1134,27 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .goal-wake-list span, .goal-wake-list strong, .goal-wake-list small { font-size: 9px; }
 .goal-wake-list strong { color: var(--green); }
 .goal-wake-list small { grid-column: 1 / -1; color: var(--muted); }
+.watcher-panel { border-color: #b7ddcd; background: linear-gradient(145deg, #fff, #f3fbf7); }
+.watcher-list { display: grid; gap: 8px; margin-bottom: 12px; }
+.watcher-list article { display: grid; grid-template-columns: 39px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 11px; border: 1px solid var(--line); border-radius: 11px; }
+.watcher-list article > div:nth-child(2) { min-width: 0; }
+.watcher-list article > div > div { display: flex; justify-content: space-between; gap: 10px; }
+.watcher-list a { display: block; overflow: hidden; color: var(--green); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.watcher-list p, .watcher-list small { display: block; margin: 3px 0 0; color: var(--muted); font-size: 9px; }
+.watcher-actions { display: flex; gap: 5px; }
+.watcher-actions button { white-space: nowrap; }
+.watcher-result { margin-top: 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); }
+.watcher-result summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; padding: 8px; cursor: pointer; list-style: none; }
+.watcher-result summary b { color: var(--green); font-size: 9px; }
+.watcher-result summary span { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.watcher-result summary time { color: var(--muted); font-size: 8px; }
+.watcher-result > div { padding: 0 8px 8px; }
+.watcher-result h5 { margin: 8px 0 4px; font-size: 9px; }
+.watcher-result pre { max-height: 150px; overflow: auto; margin: 0; padding: 7px; border-radius: 7px; background: var(--panel); font-size: 8px; white-space: pre-wrap; }
+.watcher-result ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.watcher-result li { display: grid; gap: 2px; padding: 7px; border-radius: 7px; background: var(--panel); }
+.watcher-result li code { overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.watcher-panel .automation-list article em { display: block; margin-top: 5px; color: var(--danger); font-size: 10px; font-style: normal; }
 .goal-detail-actions { position: sticky; bottom: -27px; display: flex; justify-content: flex-end; gap: 8px; margin: 0 -27px -27px; padding: 15px 27px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 95%, transparent); backdrop-filter: blur(12px); }
 .goal-detail-actions button { padding: 8px 12px; }
 .goal-detail-actions .danger-link { border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line)); border-radius: 9px; color: var(--danger); background: transparent; }

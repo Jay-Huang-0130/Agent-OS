@@ -5,9 +5,9 @@
 
 Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接受委託、持續工作、使用不同裝置能力，並對結果負責的私人 AI 作業層。
 
-專案目前已完成 Phase 0–6：可攜式基礎架構、Durable Responsibility Store、Secretary Portfolio、通用 Wake Engine，以及以 ChatGPT OAuth 驅動的 Codex Model Runtime／Request Router／Goal Compiler／Bounded Agent。
+專案目前已完成 Phase 0–7：可攜式基礎架構、Durable Responsibility Store、Secretary Portfolio、通用 Wake Engine、Codex Model Runtime／Goal Compiler／Bounded Agent，以及跨重啟的 Watcher／Hybrid long-term Goal。
 
-## Phase 0–6 已完成
+## Phase 0–7 已完成
 
 - Agent-OS 自帶固定版本的 Node.js 24 LTS，不安裝系統 Node、不執行全域 `npm install`。
 - 正式支援 64-bit Raspberry Pi OS／Debian／Ubuntu 的 ARM64 與 x64。
@@ -23,6 +23,7 @@ Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接�
 - AI 可提交 owner-specific、版本化的 LOW-risk Python JSON Capability；production code 不硬編碼天氣、公車或地圖流程。
 - 單一聊天入口會自動判斷 execution mode；低信心與高風險要求先澄清，持續責任會建立版本化 Goal Contract、Plan IR 與 bounded Task Packet。
 - Codex app-server 支援 structured output、stream delta、interrupt，以及 durable model usage／error／timeout 紀錄。
+- Phase 7 Watcher 對公開 HTTP/HTTPS 來源做正規化、SHA-256 fingerprint、Delta 與版本化 checkpoint；未變更時 0 model calls／0 notifications，只有變更才選擇性語意分析與通知。
 
 完整說明與開發流程請見 [Phase 0–2 實作說明](docs/PHASE-0-2.md)。
 
@@ -204,6 +205,7 @@ bash ./install.sh --force-agent-web-update
 - [Phase 4 Secretary Portfolio MVP](docs/PHASE-4.md)：Portfolio projection、Commitment、Approval、Project Detail 與真實 Web UI。
 - [Phase 5 Wake Engine](docs/PHASE-5.md)：AI-first 分流邊界、Generated Capability、misfire、retry、notification 與 usage ledger。
 - [Phase 6 Model Runtime](docs/PHASE-6.md)：Codex adapter、Request Router、Goal Compiler、Plan IR、Result Envelope 與 Bounded Agent。
+- [Phase 7 Watcher 與 Hybrid Goal](docs/PHASE-7.md)：公開來源抓取、SSRF policy、fingerprint、Delta、checkpoint、token budget 與 failure backoff。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
 - [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、headless 裝置代碼登入、隔離與 API。
 
@@ -213,7 +215,7 @@ bash ./install.sh --force-agent-web-update
 
 後續建議依序實作：
 
-1. Watcher delta pipeline 與 Hybrid long-term Goal（Phase 7）。
-2. Watcher 與 Agent Web protected Adapter。
-3. Memory、Artifact workflow 與 Human Takeover。
+1. Agent Web Browser Authentication Gate（Phase 8）。
+2. Attention、Agenda 與 Briefing（Phase 9）。
+3. File Broker、Generated Capability lifecycle 與 Memory。
 4. Device identity 與 Personal Device Mesh。

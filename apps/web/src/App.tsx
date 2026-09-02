@@ -19,6 +19,7 @@ import type {
   Settings,
   SetupInput,
   SystemStatus,
+  WatcherRecord,
 } from "./api/model";
 import { Icon, Logo, type IconName } from "./components/Icon";
 import { ResponsibilitiesPage, SecretaryOverview } from "./SecretaryPortfolio";
@@ -566,8 +567,8 @@ function RecordsPage({ records, loading, onRefresh }: { records?: RecordsSnapsho
   </div>;
 }
 
-function NotificationCenter({ items, onClose, onRead, onReadAll, onOpenTask }: { items: NotificationItem[]; onClose: () => void; onRead: (id: string) => void; onReadAll: () => void; onOpenTask: (task: DemoTask) => void }) {
-  return <div className="notification-layer" role="presentation" onMouseDown={onClose}><aside className="notification-center" role="dialog" aria-modal="true" aria-labelledby="notification-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="notification-title">通知</h2><p>{items.filter((item) => !item.read).length} 則尚未讀取</p></div><button className="mark-all" onClick={onReadAll}>全部標為已讀</button><button className="icon-only" onClick={onClose}><Icon name="close" /></button></header><div className="notification-list">{items.map((item) => <button key={item.id} className={item.read ? "read" : ""} onClick={() => { onRead(item.id); const task = demoTasks.find((entry) => entry.id === item.taskId); if (task) onOpenTask(task); }}><span className={`notification-kind ${item.kind}`}><Icon name={item.kind === "task" ? "check" : item.kind === "attention" ? "warning" : "activity"} /></span><span><strong>{item.title}</strong><p>{item.detail}</p><small>{relativeTime(item.createdAt)}</small></span>{!item.read && <i />}</button>)}</div><footer><Icon name="wifi" size={15} />通知透過即時連線送達</footer></aside></div>;
+function NotificationCenter({ items, onClose, onRead, onReadAll, onOpen }: { items: NotificationItem[]; onClose: () => void; onRead: (id: string) => void; onReadAll: () => void; onOpen: (item: NotificationItem) => void }) {
+  return <div className="notification-layer" role="presentation" onMouseDown={onClose}><aside className="notification-center" role="dialog" aria-modal="true" aria-labelledby="notification-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="notification-title">通知</h2><p>{items.filter((item) => !item.read).length} 則尚未讀取</p></div><button className="mark-all" onClick={onReadAll}>全部標為已讀</button><button className="icon-only" onClick={onClose}><Icon name="close" /></button></header><div className="notification-list">{items.map((item) => <button key={item.id} className={item.read ? "read" : ""} onClick={() => { onRead(item.id); onOpen(item); }}><span className={`notification-kind ${item.kind}`}><Icon name={item.kind === "task" ? "check" : item.kind === "attention" ? "warning" : "activity"} /></span><span><strong>{item.title}</strong><p>{item.detail}</p><small>{relativeTime(item.createdAt)}</small></span>{!item.read && <i />}</button>)}</div><footer><Icon name="wifi" size={15} />通知透過即時連線送達並持久保存</footer></aside></div>;
 }
 
 function NotificationToast({ item, onClose, onOpen }: { item: NotificationItem; onClose: () => void; onOpen: () => void }) {
@@ -584,6 +585,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
   const [goals, setGoals] = useState<GoalRecord[]>([]);
   const [automations, setAutomations] = useState<AutomationRecord[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityRecord[]>([]);
+  const [watchers, setWatchers] = useState<WatcherRecord[]>([]);
   const [records, setRecords] = useState<RecordsSnapshot>();
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [settings, setSettings] = useState<Settings>();
@@ -602,18 +604,20 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
 
   const refreshResponsibilities = async () => {
     try {
-      const [nextPortfolio, nextProjects, nextGoals, nextAutomations, nextCapabilities] = await Promise.all([
+      const [nextPortfolio, nextProjects, nextGoals, nextAutomations, nextCapabilities, nextWatchers] = await Promise.all([
         client.portfolio(),
         client.projects(),
         client.goals(),
         client.automations(),
         client.capabilities(),
+        client.watchers(),
       ]);
       setPortfolio(nextPortfolio);
       setProjects(nextProjects);
       setGoals(nextGoals);
       setAutomations(nextAutomations);
       setCapabilities(nextCapabilities);
+      setWatchers(nextWatchers);
       setError("");
     } catch (cause) {
       setError(messageFor(cause));
@@ -631,6 +635,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     void refresh();
     void refreshResponsibilities();
     void refreshRecords();
+    void client.notifications().then(setNotifications).catch((cause) => setError(messageFor(cause)));
     void client.settings().then(setSettings).catch((cause) => setError(messageFor(cause)));
     const stop = client.subscribe((event) => {
       if (event.type === "activity.created") setSnapshot((current) => current ? { ...current, activity: [event.data, ...current.activity].slice(0, 30) } : current);
@@ -642,7 +647,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
         setNotifications((current) => [event.data, ...current.filter((item) => item.id !== event.data.id)]);
         setToast(event.data);
       }
-      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected", "capability.validated", "automation.created", "automation.cancelled"].includes(event.type)) {
+      if (["project.created", "goal.accepted", "goal.paused", "goal.resumed", "goal.cancelled", "goal.progressed", "goal.blocked", "goal.completed", "commitment.created", "commitment.fulfilled", "commitment.cancelled", "approval.requested", "approval.approved", "approval.rejected", "capability.validated", "automation.created", "automation.cancelled", "watcher.created", "watcher.cancelled", "watcher.initial", "watcher.unchanged", "watcher.changed", "watcher.failed", "watcher.final_review"].includes(event.type)) {
         void refreshResponsibilities();
         void refreshRecords();
       }
@@ -684,7 +689,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       <main className={`content ${["overview", "tasks", "records"].includes(view) ? "workspace-content" : ""}`}>
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
         {view === "overview" && <SecretaryOverview name={name} snapshot={portfolio} projects={projects} automations={automations} client={client} onChanged={refreshResponsibilities} onChat={() => setAssistantOpen(true)} />}
-        {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} automations={automations} capabilities={capabilities} client={client} onChanged={refreshResponsibilities} />}
+        {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} automations={automations} capabilities={capabilities} watchers={watchers} client={client} onChanged={refreshResponsibilities} />}
         {view === "records" && <RecordsPage records={records} loading={recordsLoading} onRefresh={() => void refreshRecords()} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
         {view === "activity" && <div className="page-stack"><header className="page-header"><div><p className="eyebrow">Audit & activity</p><h1>活動紀錄</h1><p>登入、首次配對與設定變更都會保留在本機。</p></div></header><section className="panel activity-panel"><div className="activity-toolbar"><strong>最近事件</strong><span>{snapshot.activity.length} 筆</span></div><ActivityList items={snapshot.activity} /></section></div>}
@@ -694,8 +699,8 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
     </div>
     {assistantOpen && <AssistantPanel onClose={() => { setAssistantOpen(false); setAssistantStream(""); }} stream={assistantStream} onStart={() => setAssistantStream("")} />}
     {selectedTask && <TaskDrawer task={selectedTask} onClose={() => setSelectedTask(undefined)} />}
-    {notificationOpen && <NotificationCenter items={notifications} onClose={() => setNotificationOpen(false)} onRead={(id) => setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item))} onReadAll={() => setNotifications((current) => current.map((item) => ({ ...item, read: true })))} onOpenTask={(task) => { setNotificationOpen(false); setSelectedTask(task); }} />}
-    {toast && <NotificationToast item={toast} onClose={() => setToast(undefined)} onOpen={() => { const task = demoTasks.find((item) => item.id === toast.taskId); if (task) setSelectedTask(task); setToast(undefined); }} />}
+    {notificationOpen && <NotificationCenter items={notifications} onClose={() => setNotificationOpen(false)} onRead={(id) => { setNotifications((current) => current.map((item) => item.id === id ? { ...item, read: true } : item)); void client.readNotification(id); }} onReadAll={() => { setNotifications((current) => current.map((item) => ({ ...item, read: true }))); void client.readAllNotifications(); }} onOpen={(item) => { setNotificationOpen(false); if (item.goalId) setView("tasks"); else { const task = demoTasks.find((entry) => entry.id === item.taskId); if (task) setSelectedTask(task); } }} />}
+    {toast && <NotificationToast item={toast} onClose={() => setToast(undefined)} onOpen={() => { if (toast.goalId) setView("tasks"); else { const task = demoTasks.find((item) => item.id === toast.taskId); if (task) setSelectedTask(task); } setToast(undefined); }} />}
   </div>;
 }
 

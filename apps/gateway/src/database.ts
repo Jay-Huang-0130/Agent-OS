@@ -523,6 +523,80 @@ const migrations: Migration[] = [
       ON assistant_requests(owner_user_id, conversation_id, created_at);
     `,
   },
+  {
+    version: 7,
+    name: "phase_7_hybrid_watchers",
+    sql: `
+      CREATE TABLE IF NOT EXISTS watchers (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        source_url TEXT NOT NULL,
+        interval_seconds INTEGER NOT NULL CHECK (interval_seconds BETWEEN 60 AND 604800),
+        semantic_review INTEGER NOT NULL DEFAULT 0 CHECK (semantic_review IN (0, 1)),
+        selected_model TEXT,
+        model_token_budget INTEGER NOT NULL DEFAULT 0 CHECK (model_token_budget >= 0),
+        model_tokens_used INTEGER NOT NULL DEFAULT 0 CHECK (model_tokens_used >= 0),
+        end_at TEXT,
+        status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED')),
+        last_fingerprint TEXT,
+        last_checked_at TEXT,
+        next_check_at TEXT NOT NULL,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+        last_error TEXT,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_user_id, idempotency_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS watcher_checkpoints (
+        id TEXT PRIMARY KEY,
+        watcher_id TEXT NOT NULL REFERENCES watchers(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version > 0),
+        fingerprint TEXT NOT NULL,
+        normalized_content TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        source_etag TEXT,
+        source_last_modified TEXT,
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(watcher_id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS watcher_observations (
+        id TEXT PRIMARY KEY,
+        watcher_id TEXT NOT NULL REFERENCES watchers(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (status IN ('INITIAL', 'UNCHANGED', 'CHANGED', 'FAILED', 'FINAL_REVIEW')),
+        previous_fingerprint TEXT,
+        fingerprint TEXT,
+        delta_json TEXT NOT NULL DEFAULT '{}',
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        summary TEXT NOT NULL DEFAULT '',
+        model_run_id TEXT REFERENCES model_runs(id) ON DELETE SET NULL,
+        model_tokens INTEGER NOT NULL DEFAULT 0 CHECK (model_tokens >= 0),
+        checked_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS watcher_notifications (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        watcher_id TEXT NOT NULL REFERENCES watchers(id) ON DELETE CASCADE,
+        observation_id TEXT REFERENCES watcher_observations(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        read_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS watchers_due_idx ON watchers(status, next_check_at);
+      CREATE INDEX IF NOT EXISTS watchers_owner_idx ON watchers(owner_user_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS watcher_checkpoints_version_idx ON watcher_checkpoints(watcher_id, version DESC);
+      CREATE INDEX IF NOT EXISTS watcher_observations_checked_idx ON watcher_observations(watcher_id, checked_at DESC);
+      CREATE INDEX IF NOT EXISTS watcher_notifications_owner_idx ON watcher_notifications(owner_user_id, created_at DESC);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {

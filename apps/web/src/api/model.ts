@@ -51,6 +51,8 @@ export interface NotificationItem {
   createdAt: string;
   read: boolean;
   taskId?: string;
+  goalId?: string;
+  watcherId?: string;
 }
 
 export interface Settings {
@@ -154,6 +156,47 @@ export interface AutomationRecord {
   updatedAt: string;
 }
 
+export interface WatcherRecord {
+  id: string;
+  goalId: string;
+  ownerUserId: string;
+  sourceUrl: string;
+  intervalSeconds: number;
+  semanticReview: boolean;
+  selectedModel: string | null;
+  modelTokenBudget: number;
+  modelTokensUsed: number;
+  endAt: string | null;
+  status: "ACTIVE" | "PAUSED" | "COMPLETED" | "CANCELLED";
+  lastFingerprint: string | null;
+  lastCheckedAt: string | null;
+  nextCheckAt: string;
+  consecutiveFailures: number;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WatcherObservation {
+  id: string;
+  watcherId: string;
+  status: "INITIAL" | "UNCHANGED" | "CHANGED" | "FAILED" | "FINAL_REVIEW";
+  previousFingerprint: string | null;
+  fingerprint: string | null;
+  delta: Record<string, unknown>;
+  evidence: Array<Record<string, unknown>>;
+  summary: string;
+  modelRunId: string | null;
+  modelTokens: number;
+  checkedAt: string;
+}
+
+export interface WatcherSnapshot extends WatcherRecord {
+  checkpoints: Array<{ version: number; fingerprint: string; contentType: string; fetchedAt: string }>;
+  observations: WatcherObservation[];
+  notifications: NotificationItem[];
+}
+
 export type GoalStatus = "INBOX" | "CLARIFYING" | "PLANNING" | "ACTIVE" | "WAITING"
   | "WAITING_AUTH" | "NEEDS_APPROVAL" | "RETRYING" | "BLOCKED" | "COMPLETED" | "CANCELLED";
 export type AutonomyLevel = "OBSERVE" | "PREPARE" | "ASK_BEFORE_ACT" | "ACT_WITHIN_POLICY" | "FULLY_AUTOMATED";
@@ -245,6 +288,7 @@ export interface GoalDetail {
   tasks: TaskRecord[];
   wakes: WakeConditionRecord[];
   timeline: ResponsibilityEvent[];
+  watchers: WatcherRecord[];
 }
 
 export interface RecordsSnapshot {
@@ -358,6 +402,8 @@ export type AgentEvent =
   | { type: "assistant.response.delta"; data: { requestId: string; runId: string; delta: string } }
   | { type: "capability.validated"; data: CapabilityRecord }
   | { type: "automation.created" | "automation.cancelled"; data: AutomationRecord }
+  | { type: "watcher.created" | "watcher.cancelled"; data: WatcherRecord }
+  | { type: "watcher.initial" | "watcher.unchanged" | "watcher.changed" | "watcher.failed" | "watcher.final_review"; data: WatcherObservation }
   | { type: "project.created"; data: ProjectRecord }
   | { type: "goal.accepted" | "goal.paused" | "goal.resumed" | "goal.cancelled" | "goal.progressed" | "goal.blocked" | "goal.completed"; data: GoalRecord }
   | { type: "commitment.created" | "commitment.fulfilled" | "commitment.cancelled"; data: CommitmentRecord }

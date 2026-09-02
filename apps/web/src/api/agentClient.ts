@@ -25,6 +25,10 @@ import type {
   Settings,
   SetupInput,
   SystemStatus,
+  NotificationItem,
+  WatcherObservation,
+  WatcherRecord,
+  WatcherSnapshot,
 } from "./model";
 
 export class ApiError extends Error {
@@ -94,6 +98,18 @@ export class AgentClient {
     return this.request<RecordsSnapshot>("/api/v1/records");
   }
 
+  notifications(): Promise<NotificationItem[]> {
+    return this.request<NotificationItem[]>("/api/v1/notifications");
+  }
+
+  readNotification(id: string): Promise<void> {
+    return this.request<void>(`/api/v1/notifications/${encodeURIComponent(id)}/read`, { method: "POST", body: JSON.stringify({}) }, true);
+  }
+
+  readAllNotifications(): Promise<void> {
+    return this.request<void>("/api/v1/notifications/read-all", { method: "POST", body: JSON.stringify({}) }, true);
+  }
+
   submitAssistantRequest(message: string, options: { conversationId: string; model?: string }): Promise<AssistantIntakeReceipt> {
     return this.request<AssistantIntakeReceipt>("/api/v1/assistant/requests", {
       method: "POST",
@@ -116,6 +132,26 @@ export class AgentClient {
 
   automations(): Promise<AutomationRecord[]> {
     return this.request<AutomationRecord[]>("/api/v1/automations");
+  }
+
+  watchers(): Promise<WatcherRecord[]> {
+    return this.request<WatcherRecord[]>("/api/v1/watchers");
+  }
+
+  watcherDetail(id: string): Promise<WatcherSnapshot> {
+    return this.request<WatcherSnapshot>(`/api/v1/watchers/${encodeURIComponent(id)}`);
+  }
+
+  checkWatcher(id: string): Promise<WatcherObservation> {
+    return this.request<WatcherObservation>(`/api/v1/watchers/${encodeURIComponent(id)}/check`, {
+      method: "POST", body: JSON.stringify({}),
+    }, true);
+  }
+
+  cancelWatcher(id: string): Promise<WatcherRecord> {
+    return this.request<WatcherRecord>(`/api/v1/watchers/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    }, true);
   }
 
   cancelAutomation(id: string): Promise<AutomationRecord> {

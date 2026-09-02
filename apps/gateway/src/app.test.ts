@@ -10,6 +10,7 @@ import { loadConfig } from "./config.js";
 import type { ModelRunRequest, ModelRunResult, ModelRuntime } from "./modelRuntime.js";
 import type { ModelOption } from "./modelRuntime.js";
 import type { CapabilityExecutor } from "./wakeEngine.js";
+import type { WatcherFetcher } from "./phase7Runtime.js";
 
 const apps: FastifyInstance[] = [];
 
@@ -17,7 +18,8 @@ afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
 });
 
-async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor, modelRuntime?: ModelRuntime) {
+async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor, modelRuntime?: ModelRuntime,
+  watcherFetcher?: WatcherFetcher) {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-gateway-"));
   const config = loadConfig({
     stateDir,
@@ -29,6 +31,7 @@ async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: Capa
     ...(openAIAuth ? { openAIAuth } : {}),
     ...(capabilityExecutor ? { capabilityExecutor } : {}),
     ...(modelRuntime ? { modelRuntime } : {}),
+    ...(watcherFetcher ? { watcherFetcher } : {}),
     startWakeEngine: false,
   });
   apps.push(app);
@@ -556,4 +559,39 @@ test("Phase 5 API registers a generated Capability and schedules it without doma
   assert.equal(cancelled.json().status, "CANCELLED");
   const stillActive = await app.inject({ method: "GET", url: `/api/v1/goals/${goal.json().id}`, headers: { cookie } });
   assert.equal(stillActive.json().status, "ACTIVE");
+});
+
+test("Phase 7 API creates, checks and exposes a durable public-source Watcher", async () => {
+  let content = "version one";
+  const fetcher: WatcherFetcher = { async fetch(url) { return { content, contentType: "text/plain", finalUrl: url }; } };
+  const { app, config } = await fixture(undefined, undefined, undefined, fetcher);
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({ method: "POST", url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" } });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const headers = { cookie, "x-csrf-token": session.json().csrfToken as string };
+  const goal = await app.inject({ method: "POST", url: "/api/v1/goals",
+    headers: { ...headers, "idempotency-key": "phase7-goal" },
+    payload: { title: "Watch a public feed", desiredOutcome: "Detect changes", completionCriteria: ["Delta has evidence"] } });
+  const watcher = await app.inject({ method: "POST", url: "/api/v1/watchers",
+    headers: { ...headers, "idempotency-key": "phase7-watcher" },
+    payload: { goalId: goal.json().id, sourceUrl: "https://example.com/feed", intervalSeconds: 60, semanticReview: false } });
+  assert.equal(watcher.statusCode, 201);
+  const first = await app.inject({ method: "POST", url: `/api/v1/watchers/${watcher.json().id}/check`, headers });
+  assert.equal(first.json().status, "INITIAL");
+  content = "version two";
+  const changed = await app.inject({ method: "POST", url: `/api/v1/watchers/${watcher.json().id}/check`, headers });
+  assert.equal(changed.json().status, "CHANGED");
+  assert.equal(changed.json().evidence[0].kind, "HTTP_SNAPSHOT");
+  const detail = await app.inject({ method: "GET", url: `/api/v1/goals/${goal.json().id}/detail`, headers: { cookie } });
+  assert.equal(detail.json().watchers.length, 1);
+  const watcherDetail = await app.inject({ method: "GET", url: `/api/v1/watchers/${watcher.json().id}`, headers: { cookie } });
+  assert.equal(watcherDetail.json().checkpoints.length, 2);
+  assert.equal(watcherDetail.json().notifications.length, 1);
+  const notifications = await app.inject({ method: "GET", url: "/api/v1/notifications", headers: { cookie } });
+  assert.equal(notifications.json()[0].goalId, goal.json().id);
+  const read = await app.inject({ method: "POST", url: `/api/v1/notifications/${notifications.json()[0].id}/read`, headers });
+  assert.equal(read.statusCode, 204);
 });

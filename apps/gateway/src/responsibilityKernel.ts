@@ -899,6 +899,22 @@ export class ResponsibilityKernel {
     return rows.map(eventFromRow);
   }
 
+  recordGoalEvent(id: string, ownerUserId: string, type: string, data: Record<string, unknown>, actor = "agent-os"): EventRecord {
+    return this.transaction(() => {
+      const goal = this.requireGoal(id, ownerUserId);
+      return this.appendEvent({
+        projectId: goal.projectId,
+        goalId: goal.id,
+        aggregateType: "goal",
+        aggregateId: goal.id,
+        type,
+        data,
+        actor,
+        occurredAt: new Date().toISOString(),
+      });
+    });
+  }
+
   listGoalWakes(id: string, ownerUserId: string): WakeConditionRecord[] {
     this.requireGoal(id, ownerUserId);
     const rows = this.db.prepare("SELECT * FROM wake_conditions WHERE goal_id = ? ORDER BY created_at")

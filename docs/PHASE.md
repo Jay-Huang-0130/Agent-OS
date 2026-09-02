@@ -44,14 +44,14 @@ Repo 已有、不要重做：
 - Agent-Web 既有整合入口。
 - Codex structured Model Runtime、Request Router、Goal Compiler、Plan IR 與 bounded Result Envelope。
 - Secretary Portfolio、Commitment service、deterministic automation 與 Generated Capability。
+- Watcher fingerprint／Delta pipeline、跨重啟 checkpoint 與 Hybrid long-term Goal。
 
 目前尚未完成的 Secretary / Execution 部分：
 
-- Watcher delta／fingerprint pipeline 與 Hybrid long-term Goal。
 - Browser Authentication Gate。
 - Project Memory、Experience、Skill 與受控自主進步。
 
-下一個實作階段是 Phase 7，不回頭重寫已完成的 Phase 0–6。
+下一個實作階段是 Phase 8，不回頭重寫已完成的 Phase 0–7。
 
 ---
 
@@ -326,6 +326,8 @@ Model Run 結束後 Goal 狀態仍由 Kernel 持有
 ---
 
 ## Phase 7：Watcher 與 Hybrid Long-term Goal
+
+狀態：`COMPLETED`（2026-09-02）｜實作與驗收見 [Phase 7](PHASE-7.md)。
 
 目標：證明同一 Kernel 能處理事件追蹤和多天模糊責任。
 
