@@ -60,6 +60,8 @@ const setupSchema = z.object({
 const loginSchema = z.object({ password: z.string().min(1).max(256) }).strict();
 const assistantRequestSchema = z.object({
   message: z.string().trim().min(1).max(32_000),
+  conversationId: z.string().uuid().optional(),
+  model: z.string().trim().min(1).max(160).optional(),
 }).strict();
 const assistantRequestQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -313,6 +315,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const requestRouter = options.requestRouter ?? (modelRuntime ? new Phase6RequestRouter(modelRuntime) : undefined);
   const assistantExecution = modelRuntime
     ? new Phase6AssistantExecutor(modelRuntime, kernel, capabilityService, automationService,
+      () => database.getSettings(settingsDefaults()).timezone,
       (event) => broadcast(event))
     : undefined;
   const assistantIntake = requestRouter
@@ -482,7 +485,10 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       return apiError(reply, 400, "invalid_assistant_request", "A message between 1 and 32,000 characters is required.");
     }
     try {
-      const receipt = await assistantIntake.accept(session.userId, parsed.data.message, key);
+      const receipt = await assistantIntake.accept(session.userId, parsed.data.message, key, {
+        ...(parsed.data.conversationId ? { conversationId: parsed.data.conversationId } : {}),
+        ...(parsed.data.model ? { model: parsed.data.model } : {}),
+      });
       broadcast({ type: "assistant.request.received", data: receipt.request });
       return reply.code(202).send(receipt);
     } catch (error) {
@@ -825,6 +831,17 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   app.get("/api/v1/providers/openai", async (request, reply) => {
     if (!requireSession(request, reply, database)) return;
     return openAIAuth.status(false);
+  });
+
+  app.get("/api/v1/providers/openai/models", async (request, reply) => {
+    if (!requireSession(request, reply, database)) return;
+    if (!modelRuntime) return apiError(reply, 503, "model_runtime_unavailable", "The model runtime is unavailable.");
+    try { return await modelRuntime.listModels(); }
+    catch (error) {
+      const normalized = error instanceof ModelRuntimeError ? error : new ModelRuntimeError("provider_error",
+        error instanceof Error ? error.message : "Model catalog is unavailable.", true);
+      return apiError(reply, normalized.code === "unauthenticated" ? 401 : 503, `model_${normalized.code}`, normalized.message);
+    }
   });
 
   app.post<{ Params: { id: string } }>("/api/v1/model-runs/:id/interrupt", async (request, reply) => {

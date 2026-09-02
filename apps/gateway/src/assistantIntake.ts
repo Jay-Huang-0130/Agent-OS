@@ -17,6 +17,8 @@ export interface AssistantExecution {
     requestId: string;
     ownerUserId: string;
     message: string;
+    model?: string;
+    conversationContext: string;
     route: Exclude<RouterResult, { state: "PENDING_RUNTIME" }>;
   }): Promise<AssistantExecutionResult>;
 }
@@ -39,7 +41,7 @@ export type RouterResult = {
 };
 
 export interface RequestRouter {
-  route(input: { requestId: string; ownerUserId: string; message: string }): Promise<RouterResult>;
+  route(input: { requestId: string; ownerUserId: string; message: string; model?: string; conversationContext?: string }): Promise<RouterResult>;
 }
 
 export class PendingRuntimeRouter implements RequestRouter {
@@ -65,14 +67,22 @@ export class AssistantIntakeService {
     private readonly execution?: AssistantExecution,
   ) {}
 
-  async accept(ownerUserId: string, message: string, idempotencyKey?: string): Promise<AssistantIntakeReceipt> {
-    let request = this.database.createAssistantRequest(ownerUserId, message, idempotencyKey);
-    if (request.message !== message) {
+  async accept(ownerUserId: string, message: string, idempotencyKey?: string, options: {
+    conversationId?: string;
+    model?: string;
+  } = {}): Promise<AssistantIntakeReceipt> {
+    let request = this.database.createAssistantRequest(ownerUserId, message, idempotencyKey, options.conversationId, options.model);
+    if (request.message !== message || request.selectedModel !== (options.model ?? null)
+      || (options.conversationId && request.conversationId !== options.conversationId)) {
       throw new AssistantIntakeError(
         "idempotency_conflict",
         "This Idempotency-Key was already used for a different assistant request.",
       );
     }
+    const conversationContext = this.database.listConversationRequests(ownerUserId, request.conversationId)
+      .filter((item) => item.id !== request.id)
+      .map((item) => `User: ${item.message}\nAssistant: ${item.assistantMessage ?? "(no completed reply)"}`)
+      .join("\n\n");
     if (request.status !== "PENDING_ROUTING") {
       const result: Exclude<RouterResult, { state: "PENDING_RUNTIME" }> = {
         state: request.status === "NEEDS_CLARIFICATION" ? "NEEDS_CLARIFICATION" : "ROUTED",
@@ -84,15 +94,18 @@ export class AssistantIntakeService {
       if (request.assistantMessage || !this.execution) {
         return { request, router: result, assistantMessage: request.assistantMessage ?? assistantMessageFor(result) };
       }
-      const outcome = await this.execution.execute({ requestId: request.id, ownerUserId, message, route: result });
+      const outcome = await this.execution.execute({ requestId: request.id, ownerUserId, message,
+        ...(request.selectedModel ? { model: request.selectedModel } : {}), conversationContext, route: result });
       request = this.database.recordAssistantOutcome(request.id, ownerUserId, outcome);
       return { request, router: result, assistantMessage: outcome.assistantMessage };
     }
-    const result = await this.router.route({ requestId: request.id, ownerUserId, message });
+    const result = await this.router.route({ requestId: request.id, ownerUserId, message,
+      ...(request.selectedModel ? { model: request.selectedModel } : {}), conversationContext });
     if (result.state !== "PENDING_RUNTIME") {
       request = this.database.recordAssistantRouting(request.id, ownerUserId, result);
       const outcome = this.execution
-        ? await this.execution.execute({ requestId: request.id, ownerUserId, message, route: result })
+        ? await this.execution.execute({ requestId: request.id, ownerUserId, message,
+          ...(request.selectedModel ? { model: request.selectedModel } : {}), conversationContext, route: result })
         : { assistantMessage: assistantMessageFor(result) };
       request = this.database.recordAssistantOutcome(request.id, ownerUserId, outcome);
       return { request, router: result, assistantMessage: outcome.assistantMessage };

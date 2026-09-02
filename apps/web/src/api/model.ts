@@ -84,7 +84,9 @@ export interface SetupInput {
 export interface AssistantRequestRecord {
   id: string;
   ownerUserId: string;
+  conversationId: string;
   message: string;
+  selectedModel: string | null;
   status: "PENDING_ROUTING" | "ROUTED" | "NEEDS_CLARIFICATION" | "CANCELLED";
   executionMode: string | null;
   confidence: number | null;
@@ -95,6 +97,15 @@ export interface AssistantRequestRecord {
   modelRunId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ModelOption {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
+  supportedReasoningEfforts: string[];
 }
 
 export interface AssistantIntakeReceipt {

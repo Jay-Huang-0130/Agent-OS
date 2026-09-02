@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AgentDatabase } from "./database.js";
 import type { ModelRunRequest, ModelRunResult, ModelRuntime } from "./modelRuntime.js";
+import type { ModelOption } from "./modelRuntime.js";
 import { TrackedModelRuntime } from "./modelRuntime.js";
 import {
   BoundedAgentWorker,
@@ -28,6 +29,7 @@ class FakeRuntime implements ModelRuntime {
       usage: { inputTokens: 10, outputTokens: 20, cachedInputTokens: 0, reasoningTokens: 0 }, durationMs: 5 };
   }
   async interrupt(): Promise<boolean> { return true; }
+  async listModels(): Promise<ModelOption[]> { return []; }
 }
 
 function compiledGoal(): CompiledGoal {
@@ -72,10 +74,27 @@ test("Goal Compiler converts strict JSON-string metadata into a versioned Respon
       completionCriteria: ["測試通過"], allowedTools: ["test"], maxTokens: 1000, maxDurationMs: 30_000, maxAttempts: 2 }] },
     automationJson: "",
   }]);
-  const result = await new GoalCompiler(runtime).compile({ ownerUserId: "owner", requestId: "request", message: "完成 Phase 6", mode: "MULTI_TASK_PLAN" });
+  const result = await new GoalCompiler(runtime).compile({ ownerUserId: "owner", requestId: "request", message: "完成 Phase 6",
+    mode: "MULTI_TASK_PLAN", conversationContext: "", timezone: "Asia/Taipei" });
   assert.equal(result.plan.version, 1);
   assert.equal(result.priority.urgency, "high");
   assert.equal(result.automation, null);
+});
+
+test("Goal Compiler normalizes an incomplete automationJson for a relative reminder instead of failing", async () => {
+  const runtime = new FakeRuntime([{
+    title: "十秒提醒", desiredOutcome: "十秒後提醒使用者。", agentCommitment: ["按時提醒"],
+    completionCriteria: ["提醒已送出"], cancellationCriteria: [], externalDependencies: [], deadline: null,
+    constraintsJson: "{}", priorityJson: "{}", attentionPolicyJson: "{}", budgetJson: "{}", autonomy: "ACT_WITHIN_POLICY",
+    plan: { version: 1, nodes: [{ id: "remind", title: "送出提醒", kind: "NOTIFY", dependsOn: [],
+      completionCriteria: ["提醒已送出"], allowedTools: [], maxTokens: 500, maxDurationMs: 30_000, maxAttempts: 2 }] },
+    automationJson: JSON.stringify({ executionMode: "DETERMINISTIC_AUTOMATION", schedule: { kind: "ONCE", at: "later" } }),
+  }]);
+  const now = new Date("2026-09-01T12:00:00.000Z");
+  const result = await new GoalCompiler(runtime).compile({ ownerUserId: "owner", requestId: "reminder", message: "10秒後叫我",
+    mode: "DETERMINISTIC_AUTOMATION", conversationContext: "", timezone: "Asia/Taipei", now });
+  assert.equal(result.automation?.executionMode, "AI_EXECUTION");
+  assert.deepEqual(result.automation?.schedule, { kind: "ONCE", at: "2026-09-01T12:00:10.000Z" });
 });
 
 test("Plan Runtime persists versioned Plan IR and manager receives envelopes instead of worker transcripts", () => {

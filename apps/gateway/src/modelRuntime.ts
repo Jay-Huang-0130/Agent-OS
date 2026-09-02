@@ -18,6 +18,7 @@ export interface ModelRunRequest<T> {
   requestId?: string;
   goalId?: string;
   taskId?: string;
+  model?: string;
   instructions: string;
   input: string;
   outputSchema: Record<string, unknown>;
@@ -25,6 +26,15 @@ export interface ModelRunRequest<T> {
   timeoutMs?: number;
   maxOutputTokens?: number;
   onDelta?: (delta: string, runId: string) => void;
+}
+
+export interface ModelOption {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  isDefault: boolean;
+  supportedReasoningEfforts: string[];
 }
 
 export interface ModelRunResult<T> {
@@ -41,6 +51,7 @@ export interface ModelRunResult<T> {
 export interface ModelRuntime {
   run<T>(request: ModelRunRequest<T>): Promise<ModelRunResult<T>>;
   interrupt(runId: string): Promise<boolean>;
+  listModels(): Promise<ModelOption[]>;
 }
 
 export class ModelRuntimeError extends Error {
@@ -69,6 +80,7 @@ export class UnavailableModelRuntime implements ModelRuntime {
     throw new ModelRuntimeError("unavailable", "The Codex model runtime is unavailable.", true);
   }
   async interrupt(): Promise<boolean> { return false; }
+  async listModels(): Promise<ModelOption[]> { return []; }
 }
 
 /** Persists normalized runs without granting the model authority over Goal state. */
@@ -114,6 +126,8 @@ export class TrackedModelRuntime implements ModelRuntime {
     const delegateId = this.activeDelegateIds.get(runId);
     return delegateId ? this.delegate.interrupt(delegateId) : Promise.resolve(false);
   }
+
+  listModels(): Promise<ModelOption[]> { return this.delegate.listModels(); }
 }
 
 export const jsonObjectSchema = z.record(z.unknown());

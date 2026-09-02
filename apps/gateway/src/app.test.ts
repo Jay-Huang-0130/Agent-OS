@@ -8,6 +8,7 @@ import { buildApp } from "./app.js";
 import type { OpenAIAuthService, OpenAIConnection } from "./codexAuth.js";
 import { loadConfig } from "./config.js";
 import type { ModelRunRequest, ModelRunResult, ModelRuntime } from "./modelRuntime.js";
+import type { ModelOption } from "./modelRuntime.js";
 import type { CapabilityExecutor } from "./wakeEngine.js";
 
 const apps: FastifyInstance[] = [];
@@ -35,12 +36,16 @@ async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: Capa
 }
 
 class DirectResponseRuntime implements ModelRuntime {
+  lastModel: string | undefined;
   async run<T>(request: ModelRunRequest<T>): Promise<ModelRunResult<T>> {
+    this.lastModel = request.model;
     const output = request.parse({ message: "這是由已連線的模型直接回答。" });
     return { runId: "provider-run", provider: "fake", model: "fake-model", threadId: "thread", turnId: "turn",
       output, usage: { inputTokens: 8, outputTokens: 12, cachedInputTokens: 0, reasoningTokens: 0 }, durationMs: 2 };
   }
   async interrupt(): Promise<boolean> { return true; }
+  async listModels(): Promise<ModelOption[]> { return [{ id: "test", model: "gpt-test", displayName: "GPT Test",
+    description: "Test model", isDefault: true, supportedReasoningEfforts: ["medium"] }]; }
 }
 
 class FakeOpenAIAuth implements OpenAIAuthService {
@@ -459,7 +464,8 @@ test("unified assistant intake persists natural language without prematurely cre
 });
 
 test("Phase 6 assistant answers a question through the model runtime without creating a Goal", async () => {
-  const { app, config } = await fixture(new FakeOpenAIAuth(), undefined, new DirectResponseRuntime());
+  const runtime = new DirectResponseRuntime();
+  const { app, config } = await fixture(new FakeOpenAIAuth(), undefined, runtime);
   const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
   const setup = await app.inject({ method: "POST", url: "/api/v1/setup/complete",
     payload: { pairingCode, password: "long-enough-password", displayName: "Owner" } });
@@ -468,11 +474,16 @@ test("Phase 6 assistant answers a question through the model runtime without cre
   const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
   const accepted = await app.inject({ method: "POST", url: "/api/v1/assistant/requests",
     headers: { cookie, "x-csrf-token": session.json().csrfToken as string, "idempotency-key": "phase6-direct" },
-    payload: { message: "Responsibility Kernel 是什麼？" } });
+    payload: { message: "Responsibility Kernel 是什麼？", conversationId: "bf2abf83-6fea-4a3e-925c-52d2bde3264f", model: "gpt-test" } });
   assert.equal(accepted.statusCode, 202);
   assert.equal(accepted.json().router.executionMode, "DIRECT_RESPONSE");
   assert.equal(accepted.json().assistantMessage, "這是由已連線的模型直接回答。");
   assert.equal(accepted.json().request.modelRunId !== null, true);
+  assert.equal(accepted.json().request.selectedModel, "gpt-test");
+  assert.equal(runtime.lastModel, "gpt-test");
+  const models = await app.inject({ method: "GET", url: "/api/v1/providers/openai/models", headers: { cookie } });
+  assert.equal(models.statusCode, 200);
+  assert.equal(models.json()[0].model, "gpt-test");
   const goals = await app.inject({ method: "GET", url: "/api/v1/goals", headers: { cookie } });
   assert.equal(goals.json().length, 0);
 });

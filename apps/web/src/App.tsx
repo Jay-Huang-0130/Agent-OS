@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AgentClient, ApiError } from "./api/agentClient";
 import type {
   ActivityItem,
@@ -8,6 +8,7 @@ import type {
   CapabilityRecord,
   ConnectionState,
   NotificationItem,
+  ModelOption,
   OpenAIConnection,
   OpenAIDeviceLogin,
   GoalRecord,
@@ -357,43 +358,73 @@ function TaskDrawer({ task, onClose }: { task: DemoTask; onClose: () => void }) 
   </div>;
 }
 
+function InlineChatText({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)]+\))/gu);
+  return <>{parts.map((part, index) => {
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/u);
+    if (link) return <a href={link[2]} target="_blank" rel="noreferrer" key={index}>{link[1]}</a>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={index}>{part.slice(2, -2)}</strong>;
+    return part;
+  })}</>;
+}
+
+function ChatText({ text }: { text: string }) {
+  return <div className="chat-text">{text.split("\n").map((line, index) => line.trim()
+    ? <p className={/^[-*]\s/u.test(line) ? "chat-list-line" : undefined} key={index}><InlineChatText text={line.replace(/^[-*]\s/u, "")} /></p>
+    : <span className="chat-gap" key={index} />)}</div>;
+}
+
 function AssistantPanel({ onClose, stream, onStart }: { onClose: () => void; stream: string; onStart: () => void }) {
+  const [conversationId] = useState(() => crypto.randomUUID());
   const [message, setMessage] = useState("");
   const [requests, setRequests] = useState<AssistantRequestRecord[]>([]);
-  const [assistantMessage, setAssistantMessage] = useState("");
+  const [pendingMessage, setPendingMessage] = useState("");
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    void client.assistantRequests().then((items) => setRequests(items.reverse())).catch((cause) => setError(messageFor(cause)));
+    void client.models().then((items) => {
+      setModels(items);
+      setSelectedModel(items.find((item) => item.isDefault)?.model ?? "");
+    }).catch(() => setModels([])).finally(() => setModelsLoading(false));
   }, []);
+  useEffect(() => { bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: "smooth" }); }, [requests, pendingMessage, stream, busy]);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const content = message.trim();
     if (!content || busy) return;
     onStart();
+    setPendingMessage(content);
+    setMessage("");
     setBusy(true);
     setError("");
     try {
-      const receipt = await client.submitAssistantRequest(content);
+      const receipt = await client.submitAssistantRequest(content, { conversationId, ...(selectedModel ? { model: selectedModel } : {}) });
       setRequests((current) => [...current.filter((item) => item.id !== receipt.request.id), receipt.request]);
-      setAssistantMessage(receipt.assistantMessage);
-      setMessage("");
+      setPendingMessage("");
     } catch (cause) {
       setError(messageFor(cause));
+      setMessage(content);
+      setPendingMessage("");
     } finally {
       setBusy(false);
     }
   };
+  const streamedText = stream.replace(/^\s*\{\s*"message"\s*:\s*"/u, "").replace(/"\s*\}\s*$/u, "").replace(/\\n/gu, "\n").replace(/\\"/gu, "\"");
   return <div className="assistant-layer" role="presentation" onMouseDown={onClose}>
     <section className="assistant-panel" role="dialog" aria-modal="true" aria-labelledby="assistant-title" onMouseDown={(event) => event.stopPropagation()}>
-      <header className="assistant-head"><div className="assistant-identity"><span><Icon name="sparkle" /></span><div><strong id="assistant-title">Agent-OS</strong><small><i />單一自然語言入口</small></div></div><button className="icon-only" onClick={onClose} aria-label="關閉助手"><Icon name="close" /></button></header>
-      <div className="assistant-body">
-        {!requests.length && !assistantMessage && <div className="assistant-welcome"><p>直接告訴我你需要什麼</p><span>你不需要先判斷這是聊天、一次性工作、自動化或長期 Goal；Request Router 會負責分類。</span></div>}
-        {!!requests.length && <div className="assistant-request-history">{requests.map((item) => <div className="assistant-exchange" key={item.id}><article><p>{item.message}</p><small><i />{item.status === "PENDING_ROUTING" ? "等待 Request Router 分析" : item.executionMode ?? item.status}</small></article>{item.assistantMessage && <div className="assistant-reply"><span><Icon name="sparkle" /></span><p>{item.assistantMessage}</p></div>}</div>)}</div>}
-        {busy && stream && <div className="assistant-reply streaming"><span><Icon name="sparkle" /></span><p>{stream.replace(/^\s*\{\s*"message"\s*:\s*"/u, "").replace(/"\s*\}\s*$/u, "").replace(/\\"/gu, "\"")}</p></div>}
+      <header className="assistant-head"><div className="assistant-identity"><span><Icon name="sparkle" /></span><div><strong id="assistant-title">Agent-OS</strong><small><i />新對話</small></div></div><div className="assistant-head-actions"><label className="model-picker"><Icon name="model" size={15} /><select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)} disabled={busy || modelsLoading}><option value="">{modelsLoading ? "讀取模型…" : "自動選擇"}</option>{models.map((model) => <option value={model.model} key={model.id}>{model.displayName}{model.isDefault ? "・預設" : ""}</option>)}</select></label><button className="icon-only" onClick={onClose} aria-label="關閉助手"><Icon name="close" /></button></div></header>
+      <div className="assistant-body" ref={bodyRef}>
+        {!requests.length && !pendingMessage && <div className="assistant-welcome"><span className="welcome-orb"><Icon name="sparkle" /></span><p>今天想一起處理什麼？</p><span>直接聊天或交付任務就好，我會自己判斷下一步。</span></div>}
+        <div className="assistant-request-history">{requests.map((item) => <div className="assistant-exchange" key={item.id}><article><p>{item.message}</p><small>{item.executionMode ?? "已送出"}</small></article>{item.assistantMessage && <div className="assistant-reply"><span><Icon name="sparkle" /></span><ChatText text={item.assistantMessage} /></div>}</div>)}
+          {pendingMessage && <div className="assistant-exchange pending"><article><p>{pendingMessage}</p><small>已送出</small></article><div className="assistant-reply typing"><span><Icon name="sparkle" /></span>{streamedText ? <ChatText text={streamedText} /> : <div><div className="typing-dots"><i /><i /><i /></div><small>正在理解你的意思…</small></div>}</div></div>}
+        </div>
         {error && <div className="error-box"><Icon name="warning" />{error}</div>}
       </div>
-      <form className="assistant-compose" onSubmit={(event) => void submit(event)}><textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder="問一個問題，或描述你想完成的事…" rows={2} autoFocus /><div><span><Icon name="shield" size={15} />先保存原始意圖，再由系統判斷處理方式</span><button className="send-button" disabled={busy || !message.trim()} aria-label="送出訊息">{busy ? <span className="loader" /> : <Icon name="arrow" />}</button></div></form>
+      <form className="assistant-compose" onSubmit={(event) => void submit(event)}><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={busy ? "等我回覆後可以繼續聊…" : "傳訊息給 Agent-OS…"} rows={2} autoFocus disabled={busy} /><div><span><Icon name="shield" size={15} />Enter 傳送・Shift + Enter 換行</span><button className="send-button" disabled={busy || !message.trim()} aria-label="送出訊息">{busy ? <span className="loader" /> : <Icon name="arrow" />}</button></div></form>
     </section>
   </div>;
 }

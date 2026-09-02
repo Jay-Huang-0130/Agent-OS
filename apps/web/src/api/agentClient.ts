@@ -4,6 +4,7 @@ import type {
   AssistantRequestRecord,
   ApprovalRecord,
   AgentEvent,
+  ModelOption,
   BootstrapResponse,
   CapabilityRecord,
   ConnectionState,
@@ -87,12 +88,16 @@ export class AgentClient {
     return { system, activity };
   }
 
-  submitAssistantRequest(message: string): Promise<AssistantIntakeReceipt> {
+  submitAssistantRequest(message: string, options: { conversationId: string; model?: string }): Promise<AssistantIntakeReceipt> {
     return this.request<AssistantIntakeReceipt>("/api/v1/assistant/requests", {
       method: "POST",
       headers: { "Idempotency-Key": crypto.randomUUID() },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, conversationId: options.conversationId, ...(options.model ? { model: options.model } : {}) }),
     }, true);
+  }
+
+  models(): Promise<ModelOption[]> {
+    return this.request<ModelOption[]>("/api/v1/providers/openai/models");
   }
 
   assistantRequests(limit = 50): Promise<AssistantRequestRecord[]> {

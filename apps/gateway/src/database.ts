@@ -33,7 +33,9 @@ export type AssistantRequestStatus = "PENDING_ROUTING" | "ROUTED" | "NEEDS_CLARI
 export interface AssistantRequestRecord {
   id: string;
   ownerUserId: string;
+  conversationId: string;
   message: string;
+  selectedModel: string | null;
   status: AssistantRequestStatus;
   executionMode: string | null;
   confidence: number | null;
@@ -510,6 +512,17 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS model_runs_goal_created_idx ON model_runs(goal_id, created_at DESC);
     `,
   },
+  {
+    version: 6,
+    name: "chat_sessions_and_model_selection",
+    sql: `
+      ALTER TABLE assistant_requests ADD COLUMN conversation_id TEXT;
+      ALTER TABLE assistant_requests ADD COLUMN selected_model TEXT;
+      UPDATE assistant_requests SET conversation_id = id WHERE conversation_id IS NULL;
+      CREATE INDEX IF NOT EXISTS assistant_requests_conversation_created_idx
+      ON assistant_requests(owner_user_id, conversation_id, created_at);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {
@@ -707,7 +720,7 @@ export class AgentDatabase {
     }));
   }
 
-  createAssistantRequest(ownerUserId: string, message: string, idempotencyKey?: string): AssistantRequestRecord {
+  createAssistantRequest(ownerUserId: string, message: string, idempotencyKey?: string, conversationId?: string, selectedModel?: string): AssistantRequestRecord {
     if (idempotencyKey) {
       const existing = this.db.prepare(
         "SELECT * FROM assistant_requests WHERE owner_user_id = ? AND idempotency_key = ?",
@@ -718,7 +731,9 @@ export class AgentDatabase {
     const record: AssistantRequestRecord = {
       id: randomUUID(),
       ownerUserId,
+      conversationId: conversationId ?? randomUUID(),
       message,
+      selectedModel: selectedModel ?? null,
       status: "PENDING_ROUTING",
       executionMode: null,
       confidence: null,
@@ -732,9 +747,10 @@ export class AgentDatabase {
     };
     this.db.prepare(`INSERT INTO assistant_requests
       (id, owner_user_id, message, status, execution_mode, confidence, routing_reason,
-       requires_clarification, goal_id, idempotency_key, created_at, updated_at)
-      VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`)
-      .run(record.id, ownerUserId, message, record.status, idempotencyKey ?? null, now, now);
+       requires_clarification, goal_id, idempotency_key, created_at, updated_at, conversation_id, selected_model)
+      VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?)`)
+      .run(record.id, ownerUserId, message, record.status, idempotencyKey ?? null, now, now,
+        record.conversationId, record.selectedModel);
     return record;
   }
 
@@ -744,6 +760,13 @@ export class AgentDatabase {
       "SELECT * FROM assistant_requests WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ?",
     ).all(ownerUserId, safeLimit) as Array<Record<string, unknown>>;
     return rows.map(assistantRequestFromRow);
+  }
+
+  listConversationRequests(ownerUserId: string, conversationId: string, limit = 30): AssistantRequestRecord[] {
+    const safeLimit = Math.max(1, Math.min(100, limit));
+    const rows = this.db.prepare(`SELECT * FROM assistant_requests WHERE owner_user_id = ? AND conversation_id = ?
+      ORDER BY created_at DESC LIMIT ?`).all(ownerUserId, conversationId, safeLimit) as Array<Record<string, unknown>>;
+    return rows.map(assistantRequestFromRow).reverse();
   }
 
   recordAssistantRouting(
@@ -802,7 +825,9 @@ function assistantRequestFromRow(row: Record<string, unknown>): AssistantRequest
   return {
     id: asString(row.id),
     ownerUserId: asString(row.owner_user_id),
+    conversationId: row.conversation_id ? asString(row.conversation_id) : asString(row.id),
     message: asString(row.message),
+    selectedModel: row.selected_model === null || row.selected_model === undefined ? null : asString(row.selected_model),
     status: asString(row.status) as AssistantRequestStatus,
     executionMode: row.execution_mode === null ? null : asString(row.execution_mode),
     confidence: row.confidence === null ? null : Number(row.confidence),

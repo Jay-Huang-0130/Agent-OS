@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import type { GatewayConfig } from "./config.js";
-import { ModelRuntimeError, type ModelRunRequest, type ModelRunResult, type ModelRuntime, type ModelUsage } from "./modelRuntime.js";
+import { ModelRuntimeError, type ModelOption, type ModelRunRequest, type ModelRunResult, type ModelRuntime, type ModelUsage } from "./modelRuntime.js";
 
 export type OpenAIConnectionState = "unavailable" | "disconnected" | "connecting" | "connected" | "error";
 
@@ -296,6 +296,7 @@ export class CodexAuthBridge implements OpenAIAuthService, ModelRuntime {
   async run<T>(input: ModelRunRequest<T>): Promise<ModelRunResult<T>> {
     await this.ensureStarted();
     const threadResponse = await this.request("thread/start", {
+      ...(input.model ? { model: input.model } : {}),
       cwd: this.config.stateDir,
       approvalPolicy: "never",
       sandbox: "read-only",
@@ -343,6 +344,28 @@ export class CodexAuthBridge implements OpenAIAuthService, ModelRuntime {
     if (!target) return false;
     await this.request("turn/interrupt", target, 10_000);
     return true;
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    await this.ensureStarted();
+    const models: ModelOption[] = [];
+    let cursor: string | null = null;
+    do {
+      const result = await this.request("model/list", { cursor, limit: 100, includeHidden: false }, 20_000);
+      const data = Array.isArray(result.data) ? result.data as Array<Record<string, unknown>> : [];
+      for (const item of data) {
+        if (typeof item.id !== "string" || typeof item.model !== "string") continue;
+        const efforts = Array.isArray(item.supportedReasoningEfforts)
+          ? item.supportedReasoningEfforts.map((entry) => String((entry as Record<string, unknown>).reasoningEffort ?? "")).filter(Boolean)
+          : [];
+        models.push({ id: item.id, model: item.model,
+          displayName: typeof item.displayName === "string" ? item.displayName : item.model,
+          description: typeof item.description === "string" ? item.description : "",
+          isDefault: item.isDefault === true, supportedReasoningEfforts: efforts });
+      }
+      cursor = typeof result.nextCursor === "string" ? result.nextCursor : null;
+    } while (cursor);
+    return models;
   }
 
   async close(): Promise<void> {

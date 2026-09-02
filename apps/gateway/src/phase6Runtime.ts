@@ -96,14 +96,16 @@ const compiledGoalJsonSchema: Record<string, unknown> = {
 export class Phase6RequestRouter implements RequestRouter {
   constructor(private readonly runtime: ModelRuntime) {}
 
-  async route(input: { requestId: string; ownerUserId: string; message: string }): Promise<RouterResult> {
+  async route(input: { requestId: string; ownerUserId: string; message: string; model?: string; conversationContext?: string }): Promise<RouterResult> {
     const known = knownRoute(input.message);
     if (known) return known;
     try {
       const result = await this.runtime.run({
         purpose: "ROUTER", ownerUserId: input.ownerUserId, requestId: input.requestId,
+        ...(input.model ? { model: input.model } : {}),
         instructions: "Classify intent only. Do not solve it. Prefer clarification for low confidence or irreversible/high-risk actions.",
-        input: input.message, outputSchema: routeJsonSchema, parse: (value) => routerOutputSchema.parse(value), timeoutMs: 30_000,
+        input: `${input.conversationContext ? `Conversation so far:\n${input.conversationContext}\n\n` : ""}Latest user message:\n${input.message}`,
+        outputSchema: routeJsonSchema, parse: (value) => routerOutputSchema.parse(value), timeoutMs: 30_000,
       });
       const route = result.output;
       const needs = route.requiresClarification || route.confidence < 0.7;
@@ -126,7 +128,7 @@ function knownRoute(message: string): RouterResult | undefined {
   const highRisk = /(刪除|匯款|付款|購買|下單|發送給所有|delete|transfer money|purchase)/iu.test(text);
   if (highRisk) return { state: "NEEDS_CLARIFICATION", executionMode: "BOUNDED_AGENT", confidence: 0.99,
     reason: "這個要求可能產生不可逆或高風險操作；請確認目標、範圍與授權界線。", requiresClarification: true };
-  const scheduled = /(每天|每週|每月|每小時|定期|排程|提醒我|daily|weekly|monthly|every\s+\d+)/iu.test(text);
+  const scheduled = /(每天|每週|每月|每小時|定期|排程|提醒我|叫我|\d+\s*(?:秒|分鐘|分|小時)\s*後|daily|weekly|monthly|every\s+\d+)/iu.test(text);
   const watching = /(有變化|變更時|更新時|價格低於|庫存|監看|監控|watch|when .*changes?|notify .*when)/iu.test(text);
   if (watching) return { state: "ROUTED", executionMode: "CHANGE_WATCHER", confidence: 0.94,
     reason: "要求以外部狀態變化作為觸發條件。", requiresClarification: false };
@@ -140,19 +142,23 @@ function knownRoute(message: string): RouterResult | undefined {
 
 export class GoalCompiler {
   constructor(private readonly runtime: ModelRuntime) {}
-  async compile(input: { ownerUserId: string; requestId: string; message: string; mode: ExecutionMode }): Promise<CompiledGoal> {
+  async compile(input: { ownerUserId: string; requestId: string; message: string; mode: ExecutionMode;
+    model?: string; conversationContext: string; timezone: string; now?: Date }): Promise<CompiledGoal> {
+    const now = input.now ?? new Date();
     const result = await this.runtime.run({
       purpose: "GOAL_COMPILER", ownerUserId: input.ownerUserId, requestId: input.requestId,
+      ...(input.model ? { model: input.model } : {}),
       instructions: `Compile a versioned Responsibility Contract and bounded Plan IR. Requested execution mode: ${input.mode}.
 For a fixed schedule, generate a LOW-risk Python JSON capability only when the work is short, deterministic, testable and needs no judgment. Otherwise choose AI_EXECUTION. Never invent credentials. Every node needs measurable completion criteria and hard budgets.`,
-      input: `${input.message}\n\nReturn constraintsJson, priorityJson, attentionPolicyJson and budgetJson as JSON object strings. Return automationJson as an empty string when no schedule is needed, otherwise as JSON matching the automation proposal contract.`,
-      outputSchema: compiledGoalJsonSchema, parse: parseCompiledGoal, timeoutMs: 90_000,
+      input: `Current time: ${now.toISOString()}\nTimezone: ${input.timezone}\n${input.conversationContext ? `Conversation so far:\n${input.conversationContext}\n` : ""}Latest user message: ${input.message}\n\nReturn constraintsJson, priorityJson, attentionPolicyJson and budgetJson as JSON object strings. Return automationJson as an empty string when no schedule is needed, otherwise as JSON matching the automation proposal contract.`,
+      outputSchema: compiledGoalJsonSchema,
+      parse: (value) => parseCompiledGoal(value, { message: input.message, timezone: input.timezone, now }), timeoutMs: 90_000,
     });
     return result.output;
   }
 }
 
-function parseCompiledGoal(value: unknown): CompiledGoal {
+function parseCompiledGoal(value: unknown, fallback: { message: string; timezone: string; now: Date }): CompiledGoal {
   const raw = z.object({
     title: z.string(), desiredOutcome: z.string(), agentCommitment: z.array(z.string()), completionCriteria: z.array(z.string()),
     cancellationCriteria: z.array(z.string()), externalDependencies: z.array(z.string()), deadline: z.string().nullable(),
@@ -165,8 +171,16 @@ function parseCompiledGoal(value: unknown): CompiledGoal {
   };
   let automation: z.infer<typeof automationProposalSchema> | null = null;
   if (raw.automationJson.trim()) {
-    try { automation = automationProposalSchema.parse(JSON.parse(raw.automationJson)); }
-    catch { throw new ModelRuntimeError("invalid_output", "automationJson does not match the automation proposal contract.", true); }
+    try { automation = normalizeAutomation(JSON.parse(raw.automationJson), fallback); }
+    catch (error) {
+      const delay = relativeDelayMs(fallback.message);
+      if (delay === null) throw new ModelRuntimeError("invalid_output",
+        `automationJson could not be normalized: ${error instanceof Error ? error.message : "invalid proposal"}`, true);
+      automation = reminderFallback(fallback, delay);
+    }
+  } else {
+    const delay = relativeDelayMs(fallback.message);
+    if (delay !== null) automation = reminderFallback(fallback, delay);
   }
   return compiledGoalSchema.parse({
     title: raw.title, desiredOutcome: raw.desiredOutcome, agentCommitment: raw.agentCommitment,
@@ -178,9 +192,41 @@ function parseCompiledGoal(value: unknown): CompiledGoal {
   });
 }
 
+function relativeDelayMs(message: string): number | null {
+  const match = message.match(/(\d+)\s*(秒|分鐘|分|小時|seconds?|minutes?|hours?)\s*(?:後|later)/iu);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = match[2]?.toLowerCase();
+  const multiplier = unit === "秒" || unit?.startsWith("second") ? 1_000
+    : unit === "分鐘" || unit === "分" || unit?.startsWith("minute") ? 60_000 : 3_600_000;
+  return Math.max(1_000, Math.min(amount * multiplier, 366 * 24 * 60 * 60 * 1_000));
+}
+
+function reminderFallback(fallback: { message: string; timezone: string; now: Date }, delayMs: number) {
+  return automationProposalSchema.parse({ executionMode: "AI_EXECUTION",
+    schedule: { kind: "ONCE", at: new Date(fallback.now.getTime() + delayMs).toISOString() },
+    timezone: fallback.timezone, input: { message: fallback.message }, notificationTemplate: "{{message}}", capability: null });
+}
+
+function normalizeAutomation(value: unknown, fallback: { message: string; timezone: string; now: Date }) {
+  const raw = jsonRecord.parse(value);
+  const delay = relativeDelayMs(fallback.message);
+  let schedule = raw.schedule;
+  if (delay !== null) schedule = { kind: "ONCE", at: new Date(fallback.now.getTime() + delay).toISOString() };
+  const capability = raw.capability ?? null;
+  let executionMode = raw.executionMode === "DETERMINISTIC_AUTOMATION" ? "DETERMINISTIC_AUTOMATION" : "AI_EXECUTION";
+  if (executionMode === "DETERMINISTIC_AUTOMATION" && !automationProposalSchema.shape.capability.unwrap().safeParse(capability).success) {
+    executionMode = "AI_EXECUTION";
+  }
+  return automationProposalSchema.parse({ executionMode, schedule, timezone: typeof raw.timezone === "string" ? raw.timezone : fallback.timezone,
+    input: raw.input ?? { message: fallback.message },
+    notificationTemplate: typeof raw.notificationTemplate === "string" ? raw.notificationTemplate : "{{message}}",
+    capability: executionMode === "DETERMINISTIC_AUTOMATION" ? capability : null });
+}
+
 export class PlanRuntime {
   constructor(private readonly kernel: ResponsibilityKernel) {}
-  materialize(ownerUserId: string, requestId: string, compiled: CompiledGoal): { goal: GoalRecord; plan: PlanRecord; tasks: TaskRecord[] } {
+  materialize(ownerUserId: string, requestId: string, compiled: CompiledGoal, model?: string): { goal: GoalRecord; plan: PlanRecord; tasks: TaskRecord[] } {
     const goal = this.kernel.createGoal(ownerUserId, {
       title: compiled.title, desiredOutcome: compiled.desiredOutcome, agentCommitment: compiled.agentCommitment,
       completionCriteria: compiled.completionCriteria, cancellationCriteria: compiled.cancellationCriteria,
@@ -192,7 +238,8 @@ export class PlanRuntime {
     const tasks = compiled.plan.nodes.map((node, position) => this.kernel.createTask({
       goalId: goal.id, planId: plan.id, title: node.title, kind: node.kind, position,
       specification: { nodeId: node.id, dependsOn: node.dependsOn, completionCriteria: node.completionCriteria,
-        allowedTools: node.allowedTools, budget: { maxTokens: node.maxTokens, maxDurationMs: node.maxDurationMs, maxAttempts: node.maxAttempts } },
+        allowedTools: node.allowedTools, ...(model ? { selectedModel: model } : {}),
+        budget: { maxTokens: node.maxTokens, maxDurationMs: node.maxDurationMs, maxAttempts: node.maxAttempts } },
     }, ownerUserId));
     return { goal, plan, tasks };
   }
@@ -207,21 +254,26 @@ export class Phase6AssistantExecutor implements AssistantExecution {
   constructor(
     private readonly runtime: ModelRuntime, kernel: ResponsibilityKernel,
     private readonly capabilities: CapabilityService, private readonly automations: AutomationService,
+    private readonly getTimezone: () => string,
     private readonly emit?: ((event: { type: string; data: Record<string, unknown> }) => void),
   ) { this.compiler = new GoalCompiler(runtime); this.plans = new PlanRuntime(kernel); }
 
-  async execute(input: { requestId: string; ownerUserId: string; message: string; route: Exclude<RouterResult, { state: "PENDING_RUNTIME" }> }): Promise<AssistantExecutionResult> {
+  async execute(input: { requestId: string; ownerUserId: string; message: string; model?: string; conversationContext: string;
+    route: Exclude<RouterResult, { state: "PENDING_RUNTIME" }> }): Promise<AssistantExecutionResult> {
     if (input.route.state === "NEEDS_CLARIFICATION") return { assistantMessage: `我需要先確認：${input.route.reason}` };
     if (input.route.executionMode === "DIRECT_RESPONSE") {
       const response = await this.runtime.run({ purpose: "DIRECT_RESPONSE", ownerUserId: input.ownerUserId, requestId: input.requestId,
-        instructions: "Answer the user's question directly in the user's language. Do not create a Goal.", input: input.message,
+        ...(input.model ? { model: input.model } : {}),
+        instructions: "Answer the user's question directly in the user's language. Do not create a Goal.",
+        input: `${input.conversationContext ? `Conversation so far:\n${input.conversationContext}\n\n` : ""}Latest user message:\n${input.message}`,
         outputSchema: directJsonSchema, parse: (value) => directSchema.parse(value), timeoutMs: 60_000,
         onDelta: (delta, runId) => this.emit?.({ type: "assistant.response.delta", data: { requestId: input.requestId, runId, delta } }) });
       return { assistantMessage: response.output.message, modelRunId: response.runId };
     }
     const compiled = await this.compiler.compile({ ownerUserId: input.ownerUserId, requestId: input.requestId,
-      message: input.message, mode: input.route.executionMode });
-    const materialized = this.plans.materialize(input.ownerUserId, input.requestId, compiled);
+      message: input.message, mode: input.route.executionMode, ...(input.model ? { model: input.model } : {}),
+      conversationContext: input.conversationContext, timezone: this.getTimezone() });
+    const materialized = this.plans.materialize(input.ownerUserId, input.requestId, compiled, input.model);
     let automation: AutomationRecord | undefined;
     if (compiled.automation) {
       let capabilityId: string | undefined;
@@ -259,7 +311,7 @@ export type ResultEnvelope = z.infer<typeof resultEnvelopeSchema>;
 export class BoundedAgentWorker {
   constructor(private readonly runtime: ModelRuntime) {}
   async execute(packet: { ownerUserId: string; goalId: string; taskId: string; objective: string; context: Record<string, unknown>;
-    allowedTools: string[]; budget: { maxTokens: number; maxDurationMs: number; maxAttempts: number } }): Promise<ResultEnvelope> {
+    model?: string; allowedTools: string[]; budget: { maxTokens: number; maxDurationMs: number; maxAttempts: number } }): Promise<ResultEnvelope> {
     const schema = { type: "object", additionalProperties: false, required: ["status", "summary", "outputs", "evidence", "nextActions"],
       properties: { status: { type: "string", enum: ["COMPLETED", "BLOCKED", "FAILED"] }, summary: { type: "string" },
         outputs: { type: "array", items: { type: "object", additionalProperties: false, required: ["name", "value"],
@@ -271,6 +323,7 @@ export class BoundedAgentWorker {
     for (let attempt = 1; attempt <= packet.budget.maxAttempts; attempt += 1) {
       try {
         const result = await this.runtime.run({ purpose: "WORKER", ownerUserId: packet.ownerUserId, goalId: packet.goalId, taskId: packet.taskId,
+          ...(packet.model ? { model: packet.model } : {}),
           instructions: `Complete only the Task Packet. Allowed tools: ${packet.allowedTools.join(", ") || "none"}. Return evidence; prose alone cannot complete a task.`,
           input: JSON.stringify({ objective: packet.objective, context: packet.context }), outputSchema: schema,
           parse: (value) => resultEnvelopeSchema.parse(value), timeoutMs: packet.budget.maxDurationMs, maxOutputTokens: packet.budget.maxTokens });
@@ -339,6 +392,7 @@ export class PlanManager {
       ? specification.allowedTools.filter((item): item is string => typeof item === "string") : [];
     try {
       const envelope = await this.worker.execute({ ownerUserId, goalId: task.goalId, taskId: task.id, objective: task.title,
+        ...(typeof specification.selectedModel === "string" ? { model: specification.selectedModel } : {}),
         context: buildManagerContext(this.database, task.goalId), allowedTools,
         budget: { maxTokens: Number(rawBudget?.maxTokens ?? 2_000), maxDurationMs: Number(rawBudget?.maxDurationMs ?? 90_000),
           maxAttempts: Number(rawBudget?.maxAttempts ?? 2) } });

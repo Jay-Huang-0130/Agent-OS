@@ -111,13 +111,14 @@ describe("AgentClient", () => {
     const client = new AgentClient();
     await client.bootstrap();
 
-    await client.submitAssistantRequest("幫我找實習");
+    await client.submitAssistantRequest("幫我找實習", { conversationId: "bf2abf83-6fea-4a3e-925c-52d2bde3264f", model: "gpt-test" });
 
     const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
     const headers = new Headers(init.headers);
     expect(path).toBe("/api/v1/assistant/requests");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({ message: "幫我找實習" });
+    expect(JSON.parse(String(init.body))).toEqual({ message: "幫我找實習",
+      conversationId: "bf2abf83-6fea-4a3e-925c-52d2bde3264f", model: "gpt-test" });
     expect(headers.get("x-csrf-token")).toBe("csrf-assistant");
     expect(headers.get("idempotency-key")).toBeTruthy();
   });
