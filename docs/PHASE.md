@@ -630,19 +630,6 @@ Decision Queue、Daily Brief、Weekly Review
 
 ## 4. 現在應該做什麼
 
-下一步只做 Phase 3，不同時開始 Browser、Device Mesh 或自主進步。
+Phase 0–7 已完成。下一步只做 Phase 8：Agent-Web Browser Authentication Gate，不同時開始 Memory、Self-Improvement 或 Device Mesh。
 
-建議順序：
-
-1. 定稿 Phase 3 Schema 與 migration policy。
-2. 實作 Project、Goal、Event、Wake、Lease、Outbox。
-3. 實作 Goal / Task state transition service。
-4. 加入 restart reconciliation 和 idempotency tests。
-5. 建立最小 Goal API。
-6. 通過 Phase 3 完成標準後再進入 Secretary UI。
-
-第一個 milestone 應該是：
-
-> **在完全不呼叫 LLM 的情況下，Agent-OS 接受一個 Goal、持久保存、跨重啟恢復，並且只有完成驗證或使用者取消才能結束。**
-
-這個 milestone 成立後，後面的 AI、Cron、Browser、Memory 和 Skill 才有可靠的責任核心可以依附。
+目前執行清單與已完成項目的刪除線標記，統一維護在 [開發計劃表](DEVELOPMENT-PLAN.md)。

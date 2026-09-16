@@ -206,6 +206,7 @@ bash ./install.sh --force-agent-web-update
 - [Phase 5 Wake Engine](docs/PHASE-5.md)：AI-first 分流邊界、Generated Capability、misfire、retry、notification 與 usage ledger。
 - [Phase 6 Model Runtime](docs/PHASE-6.md)：Codex adapter、Request Router、Goal Compiler、Plan IR、Result Envelope 與 Bounded Agent。
 - [Phase 7 Watcher 與 Hybrid Goal](docs/PHASE-7.md)：公開來源抓取、SSRF policy、fingerprint、Delta、checkpoint、token budget 與 failure backoff。
+- [開發計劃表](docs/DEVELOPMENT-PLAN.md)：Phase 0–13 的完成狀態、待辦與主要里程碑。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
 - [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、headless 裝置代碼登入、隔離與 API。
 

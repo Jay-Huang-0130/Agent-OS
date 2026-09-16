@@ -30,6 +30,7 @@ required_files=(
     scripts/agent-osctl
     systemd/agent-os.service.in
     docs/AGENT-WEB-INTEGRATION.md
+    docs/DEVELOPMENT-PLAN.md
     docs/OPENAI-OAUTH.md
     docs/PHASE-3.md
     docs/PHASE-4.md
