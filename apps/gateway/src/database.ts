@@ -677,6 +677,63 @@ const migrations: Migration[] = [
       ON browser_notifications(owner_user_id, created_at DESC);
     `,
   },
+  {
+    version: 9,
+    name: "telegram_messaging_channel",
+    sql: `
+      CREATE TABLE IF NOT EXISTS telegram_pairing_codes (
+        code_hash TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS telegram_bindings (
+        owner_user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        telegram_user_id TEXT NOT NULL UNIQUE,
+        chat_id TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL DEFAULT '',
+        conversation_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS telegram_updates (
+        update_id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL CHECK (status IN ('RECEIVED', 'PROCESSED', 'FAILED')),
+        error TEXT,
+        received_at TEXT NOT NULL,
+        processed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS telegram_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS telegram_deliveries (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'SENDING', 'SENT', 'FAILED')),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        available_at TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        external_message_id TEXT,
+        created_at TEXT NOT NULL,
+        sent_at TEXT,
+        last_error TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS telegram_pairing_expiry_idx
+      ON telegram_pairing_codes(expires_at, consumed_at);
+      CREATE INDEX IF NOT EXISTS telegram_deliveries_due_idx
+      ON telegram_deliveries(status, available_at, created_at);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {

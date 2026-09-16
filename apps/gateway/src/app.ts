@@ -26,6 +26,12 @@ import { ImmediatePlanRunner, ModelAiWakeExecutor, Phase6AssistantExecutor, Phas
 import { WatcherError, WatcherService, type WatcherFetcher } from "./phase7Runtime.js";
 import { collectSystemStatus } from "./metrics.js";
 import {
+  HttpTelegramBotApi,
+  TelegramChannelService,
+  type TelegramBotApi,
+  type TelegramNotification,
+} from "./telegram.js";
+import {
   autonomyLevels,
   commitmentOwners,
   commitmentStatuses,
@@ -196,6 +202,8 @@ export interface BuildAppOptions {
   startWakeEngine?: boolean;
   startPlanRunner?: boolean;
   startWatcherEngine?: boolean;
+  telegramApi?: TelegramBotApi;
+  startTelegram?: boolean;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -322,6 +330,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const sockets = new Set<EventSocket>();
   const loginAttempts = new Map<string, LoginAttempt>();
   const pairingCode = database.hasOwner() ? undefined : ensurePairingCode(config.pairingCodePath);
+  let telegramChannel: TelegramChannelService | undefined;
 
   const broadcast = (event: unknown) => {
     const frame = JSON.stringify(event);
@@ -333,9 +342,17 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       }
     }
   };
+  const publishNotification = (item: unknown) => {
+    broadcast({ type: "notification.created", data: item });
+    if (!item || typeof item !== "object") return;
+    const candidate = item as Partial<TelegramNotification>;
+    if (typeof candidate.id !== "string" || typeof candidate.title !== "string" || typeof candidate.detail !== "string") return;
+    const owner = database.getOwner();
+    if (owner) telegramChannel?.notify(owner.id, candidate as TelegramNotification);
+  };
   const browserService = new BrowserPhase8Service(database, kernel,
     options.browserAdapter ?? new AgentWebCliAdapter(config.agentWebController),
-    (item) => broadcast({ type: "notification.created", data: item }));
+    (item) => publishNotification(item));
   await browserService.initialize();
   const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
   const authRuntime = typeof (openAIAuth as Partial<ModelRuntime>).run === "function"
@@ -343,7 +360,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const rawModelRuntime = options.modelRuntime ?? authRuntime;
   const modelRuntime = rawModelRuntime ? new TrackedModelRuntime(database, rawModelRuntime) : undefined;
   const watcherService = new WatcherService(database, kernel, options.watcherFetcher, modelRuntime,
-    (item) => broadcast({ type: "notification.created", data: item }));
+    (item) => publishNotification(item));
   const watcherEngineEnabled = options.startWatcherEngine ?? options.startWakeEngine !== false;
   if (watcherEngineEnabled) watcherService.start();
   const requestRouter = options.requestRouter ?? (modelRuntime ? new Phase6RequestRouter(modelRuntime) : undefined);
@@ -375,11 +392,19 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const assistantIntake = requestRouter
     ? new AssistantIntakeService(database, requestRouter, options.requestRouter ? undefined : assistantExecution)
     : new AssistantIntakeService(database);
+  let telegramConfigurationError: string | null = null;
+  let telegramApi = options.telegramApi;
+  if (!telegramApi && config.telegramBotToken) {
+    try { telegramApi = new HttpTelegramBotApi(config.telegramBotToken); }
+    catch { telegramConfigurationError = "Telegram Bot Token format is invalid."; }
+  }
+  telegramChannel = telegramApi ? new TelegramChannelService(database, assistantIntake, telegramApi) : undefined;
+  if (telegramChannel && options.startTelegram !== false) telegramChannel.start();
   const aiWakeExecutor = options.aiWakeExecutor ?? (modelRuntime ? new ModelAiWakeExecutor(modelRuntime, database, kernel, browserService) : undefined);
   const wakeEngine = new WakeEngine(database, capabilityService, capabilityExecutor, {
     ...options.wakeEngine,
     ...(aiWakeExecutor ? { aiExecutor: aiWakeExecutor } : {}),
-    notify: (item) => broadcast({ type: "notification.created", data: item }),
+    notify: (item) => publishNotification(item),
   });
   if (options.startWakeEngine !== false) wakeEngine.start();
   const stopOpenAIUpdates = openAIAuth.onUpdate((status) => {
@@ -601,6 +626,49 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     addActivity("settings", "Settings updated", `${session.displayName} changed device settings.`);
     broadcast({ type: "settings.updated", data: parsed.data });
     return parsed.data;
+  });
+
+  app.get("/api/v1/channels/telegram", async (request, reply) => {
+    if (!requireSession(request, reply, database)) return;
+    return telegramChannel?.status() ?? {
+      configured: Boolean(config.telegramBotToken),
+      running: false,
+      botUsername: null,
+      connected: false,
+      connectedDisplayName: null,
+      lastError: telegramConfigurationError,
+    };
+  });
+
+  app.post("/api/v1/channels/telegram/pairing", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    if (!telegramChannel) {
+      return apiError(reply, 503, "telegram_not_configured",
+        telegramConfigurationError ?? "Set AGENT_OS_TELEGRAM_BOT_TOKEN_FILE and restart Agent-OS before pairing Telegram.");
+    }
+    const pairing = telegramChannel.createPairing(session.userId);
+    addActivity("settings", "Telegram pairing started", `${session.displayName} generated a short-lived Telegram pairing code.`);
+    return reply.code(201).send(pairing);
+  });
+
+  app.post("/api/v1/channels/telegram/test", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    if (!telegramChannel) return apiError(reply, 503, "telegram_not_configured", "Telegram is not configured.");
+    if (!await telegramChannel.sendTest(session.userId)) {
+      return apiError(reply, 409, "telegram_not_connected", "Pair Telegram before sending a test message.");
+    }
+    return reply.code(202).send({ queued: true });
+  });
+
+  app.delete("/api/v1/channels/telegram", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    if (!telegramChannel) return apiError(reply, 503, "telegram_not_configured", "Telegram is not configured.");
+    telegramChannel.disconnect(session.userId);
+    addActivity("settings", "Telegram disconnected", `${session.displayName} disconnected Telegram messaging.`);
+    return reply.code(204).send();
   });
 
   app.post("/api/v1/assistant/requests", async (request, reply) => {
@@ -1191,16 +1259,13 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       const status = await collectSystemStatus(config.version);
       broadcast({ type: "system.status", data: status });
       if (status.overall === "degraded" && previousOverallStatus !== "degraded") {
-        broadcast({
-          type: "notification.created",
-          data: {
-            id: `system-${Date.now()}`,
-            title: "系統狀態需要注意",
-            detail: "Agent-OS 偵測到資源或服務異常，請查看系統狀態。",
-            kind: "system",
-            createdAt: status.generatedAt,
-            read: false,
-          },
+        publishNotification({
+          id: `system-${Date.now()}`,
+          title: "系統狀態需要注意",
+          detail: "Agent-OS 偵測到資源或服務異常，請查看系統狀態。",
+          kind: "system",
+          createdAt: status.generatedAt,
+          read: false,
         });
       }
       previousOverallStatus = status.overall;
@@ -1234,6 +1299,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     await watcherService.stop();
     await planRunner?.stop();
     await wakeEngine.stop();
+    await telegramChannel?.stop();
     for (const socket of sockets) socket.close(1001, "server shutdown");
     sockets.clear();
     stopOpenAIUpdates();

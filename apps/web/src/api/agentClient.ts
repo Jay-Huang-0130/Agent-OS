@@ -28,6 +28,8 @@ import type {
   Settings,
   SetupInput,
   SystemStatus,
+  TelegramConnection,
+  TelegramPairing,
   NotificationItem,
   WatcherObservation,
   WatcherRecord,
@@ -283,6 +285,22 @@ export class AgentClient {
 
   disconnectOpenAI(): Promise<void> {
     return this.request<void>("/api/v1/providers/openai/logout", { method: "POST" }, true);
+  }
+
+  telegramStatus(): Promise<TelegramConnection> {
+    return this.request<TelegramConnection>("/api/v1/channels/telegram");
+  }
+
+  startTelegramPairing(): Promise<TelegramPairing> {
+    return this.request<TelegramPairing>("/api/v1/channels/telegram/pairing", { method: "POST" }, true);
+  }
+
+  testTelegram(): Promise<{ queued: boolean }> {
+    return this.request<{ queued: boolean }>("/api/v1/channels/telegram/test", { method: "POST" }, true);
+  }
+
+  disconnectTelegram(): Promise<void> {
+    return this.request<void>("/api/v1/channels/telegram", { method: "DELETE" }, true);
   }
 
   subscribe(onEvent: (event: AgentEvent) => void, onState: (state: ConnectionState) => void): () => void {

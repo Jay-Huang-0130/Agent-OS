@@ -105,6 +105,21 @@ export interface OpenAIDeviceLogin {
   userCode: string;
 }
 
+export interface TelegramConnection {
+  configured: boolean;
+  running: boolean;
+  botUsername: string | null;
+  connected: boolean;
+  connectedDisplayName: string | null;
+  lastError: string | null;
+}
+
+export interface TelegramPairing {
+  code: string;
+  expiresAt: string;
+  deepLink: string | null;
+}
+
 export interface SetupInput {
   pairingCode: string;
   password: string;

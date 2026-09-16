@@ -66,6 +66,30 @@ describe("AgentClient", () => {
     expect(new Headers(init.headers).get("x-csrf-token")).toBe("csrf-test");
   });
 
+  it("starts Telegram pairing with the authenticated CSRF token", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: "Agent-OS", version: "0.1.0", setupRequired: false, secure: true, hostname: "pi",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true, csrfToken: "csrf-telegram", user: { id: "owner", displayName: "Owner", initials: "OW" },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: "ABCDEFGH", expiresAt: "2026-09-16T01:00:00.000Z", deepLink: "https://t.me/agent_os_bot?start=ABCDEFGH",
+      }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentClient();
+    await client.bootstrap();
+
+    const pairing = await client.startTelegramPairing();
+
+    expect(pairing.code).toBe("ABCDEFGH");
+    const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(path).toBe("/api/v1/channels/telegram/pairing");
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("x-csrf-token")).toBe("csrf-telegram");
+  });
+
   it("creates durable Goals with CSRF and an idempotency key", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

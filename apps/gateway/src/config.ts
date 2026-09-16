@@ -1,5 +1,5 @@
 import { homedir, hostname } from "node:os";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export interface GatewayConfig {
@@ -12,6 +12,7 @@ export interface GatewayConfig {
   codexEntrypoint: string;
   pythonExecutable: string;
   agentWebController: string;
+  telegramBotToken?: string;
   webDistPath: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -34,6 +35,11 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
   const tlsCertPath = process.env.AGENT_OS_TLS_CERT_FILE;
   const tlsKeyPath = process.env.AGENT_OS_TLS_KEY_FILE;
   const localAgentWebController = join(homedir(), ".local", "bin", "agent-webctl");
+  const telegramTokenFile = process.env.AGENT_OS_TELEGRAM_BOT_TOKEN_FILE
+    ? resolve(process.env.AGENT_OS_TELEGRAM_BOT_TOKEN_FILE)
+    : join(stateDir, "credentials", "telegram-bot-token");
+  const telegramBotToken = process.env.AGENT_OS_TELEGRAM_BOT_TOKEN?.trim()
+    || (existsSync(telegramTokenFile) ? readFileSync(telegramTokenFile, "utf8").trim() : undefined);
 
   return {
     host: process.env.AGENT_OS_HOST ?? "0.0.0.0",
@@ -50,6 +56,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     pythonExecutable: process.env.AGENT_OS_PYTHON ?? (process.platform === "win32" ? "python" : "python3"),
     agentWebController: process.env.AGENT_OS_BROWSER_CTL
       ?? (existsSync(localAgentWebController) ? localAgentWebController : "agent-webctl"),
+    ...(telegramBotToken ? { telegramBotToken } : {}),
     webDistPath: process.env.AGENT_OS_WEB_DIST
       ? resolve(process.env.AGENT_OS_WEB_DIST)
       : resolve(process.cwd(), "apps", "web", "dist"),

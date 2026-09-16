@@ -42,7 +42,7 @@ function fixture(fetcher: WatcherFetcher, runtime?: ModelRuntime, notify?: (valu
 test("Phase 7 migration creates durable watcher storage", () => {
   const database = new AgentDatabase(":memory:");
   try {
-    assert.deepEqual(database.migrationVersions(), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(database.migrationVersions(), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
     const tables = database.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'watcher%'").all() as Array<{ name: string }>;
     assert.deepEqual(tables.map((item) => item.name).sort(), ["watcher_checkpoints", "watcher_notifications", "watcher_observations", "watchers"]);
   } finally { database.close(); }

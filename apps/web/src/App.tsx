@@ -19,6 +19,8 @@ import type {
   Settings,
   SetupInput,
   SystemStatus,
+  TelegramConnection,
+  TelegramPairing,
   WatcherRecord,
 } from "./api/model";
 import { Icon, Logo, type IconName } from "./components/Icon";
@@ -142,6 +144,54 @@ function Services({ system }: { system: SystemStatus }) {
   return <div className="service-list">{system.services.map((service) => <div className="service-item" key={service.id}><span><Icon name={service.id === "browser" ? "browser" : service.id === "model" ? "model" : "server"} /></span><div><strong>{service.name}</strong><small>{service.detail}</small></div>{service.latencyMs !== undefined && <em>{service.latencyMs} ms</em>}<b className={service.state}><i />{service.state === "healthy" ? "運作中" : service.state === "degraded" ? "需注意" : service.state === "starting" ? "啟動中" : "未啟用"}</b></div>)}</div>;
 }
 
+function TelegramCard() {
+  const [status, setStatus] = useState<TelegramConnection>();
+  const [pairing, setPairing] = useState<TelegramPairing>();
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const refresh = () => client.telegramStatus().then((next) => {
+    setStatus(next);
+    if (next.connected) setPairing(undefined);
+  }).catch((error) => setNotice(messageFor(error)));
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!pairing) return;
+    const timer = window.setInterval(() => void refresh(), 2_000);
+    return () => window.clearInterval(timer);
+  }, [pairing]);
+  const connect = async () => {
+    setBusy(true); setNotice("");
+    try { setPairing(await client.startTelegramPairing()); }
+    catch (error) { setNotice(messageFor(error)); }
+    finally { setBusy(false); }
+  };
+  const test = async () => {
+    setBusy(true); setNotice("");
+    try { await client.testTelegram(); setNotice("測試訊息已送出。"); }
+    catch (error) { setNotice(messageFor(error)); }
+    finally { setBusy(false); }
+  };
+  const disconnect = async () => {
+    setBusy(true); setNotice("");
+    try { await client.disconnectTelegram(); await refresh(); setNotice("Telegram 已解除配對。"); }
+    catch (error) { setNotice(messageFor(error)); }
+    finally { setBusy(false); }
+  };
+  const state = !status?.configured ? "unavailable" : status.connected ? "connected" : status.running ? "disconnected" : "error";
+  return <section className={`provider-card telegram-card ${state}`}>
+    <div className="provider-logo"><Icon name="wifi" size={24} /></div>
+    <div className="provider-copy"><div><h2>Telegram</h2><span className="provider-state"><i />{!status ? "檢查中" : !status.configured ? "尚未設定 Token" : status.connected ? "已連線" : status.running ? "等待配對" : "連線異常"}</span></div><p>{status?.connected ? `${status.connectedDisplayName ?? "Telegram 帳號"}・@${status.botUsername ?? "bot"}` : status?.configured ? `透過 @${status.botUsername ?? "Telegram Bot"} 從手機傳送指令並接收 Agent-OS 通知。` : "先在樹莓派設定 BotFather 提供的 Token，重新啟動 Agent-OS 後即可配對。"}</p></div>
+    {status?.connected ? <div className="telegram-actions"><button className="secondary" disabled={busy} onClick={() => void test()}>傳送測試</button><button className="secondary danger-button" disabled={busy} onClick={() => void disconnect()}>解除配對</button></div> : <button className="primary provider-connect" disabled={busy || !status?.configured || !status.running} onClick={() => void connect()}>{busy ? "產生中…" : "連接 Telegram"}<Icon name="arrow" size={17} /></button>}
+    {pairing && <div className="telegram-pairing"><div><small>一次性配對碼</small><strong>{pairing.code}</strong><span>10 分鐘內有效</span></div>{pairing.deepLink && <a className="primary" href={pairing.deepLink} target="_blank" rel="noreferrer">開啟 Telegram<Icon name="arrow" size={16} /></a>}</div>}
+    {(notice || status?.lastError) && <div className="provider-error"><Icon name="warning" size={16} />{notice || status?.lastError}</div>}
+    <small className="provider-security"><Icon name="lock" size={14} />只接受完成配對的 Telegram 數字使用者 ID；Bot Token 不會傳到瀏覽器。</small>
+  </section>;
+}
+
 function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { value: Settings; provider?: OpenAIConnection; onProvider: (status: OpenAIConnection) => void; onSave: (settings: Settings) => Promise<void>; onNavigate: (view: "system" | "activity") => void }) {
   const [draft, setDraft] = useState(value);
   const [busy, setBusy] = useState(false);
@@ -201,6 +251,7 @@ function SettingsPage({ value, provider, onProvider, onSave, onNavigate }: { val
       {providerError && <div className="provider-error"><Icon name="warning" size={16} />{providerError}</div>}
       <small className="provider-security"><Icon name="lock" size={14} />OAuth 權杖只保存在這台裝置的 Agent-OS 私有資料目錄，不會傳到瀏覽器。</small>
     </section>
+    <TelegramCard />
     <form className="settings-card" onSubmit={save}><div className="setting-row"><span><Icon name="server" /></span><div><label>裝置名稱<input value={draft.deviceName} onChange={(event) => setDraft({ ...draft, deviceName: event.target.value })} /></label><p>顯示在管理介面與未來的裝置探索中。</p></div></div><div className="setting-row"><span><Icon name="globe" /></span><div><label>語言<select value={draft.language} onChange={(event) => setDraft({ ...draft, language: event.target.value as Settings["language"] })}><option value="zh-Hant">繁體中文</option><option value="en">English</option></select></label><label>時區<input value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })} /></label></div></div><div className="setting-row"><span><Icon name="palette" /></span><div><label>外觀<select value={draft.theme} onChange={(event) => setDraft({ ...draft, theme: event.target.value as Settings["theme"] })}><option value="system">跟隨系統</option><option value="light">淺色</option><option value="dark">深色</option></select></label><p>變更會立即套用在目前的瀏覽器。</p></div></div><div className="settings-actions"><span>{notice}</span><button className="primary" disabled={busy}>{busy ? "儲存中…" : "儲存設定"}</button></div></form>
     <section className="settings-management"><button onClick={() => onNavigate("system")}><span><Icon name="activity" /></span><div><strong>系統狀態</strong><small>資源、服務與裝置健康度</small></div><Icon name="chevron" /></button><button onClick={() => onNavigate("activity")}><span><Icon name="update" /></span><div><strong>活動紀錄</strong><small>登入、安全與設定變更</small></div><Icon name="chevron" /></button></section>
     {login && <div className="oauth-layer" role="presentation"><section className="oauth-dialog" role="dialog" aria-modal="true" aria-labelledby="oauth-title"><span className="oauth-mark"><Icon name="model" size={25} /></span><p className="eyebrow">Device authorization</p><h2 id="oauth-title">完成 OpenAI 登入</h2><p>請在剛開啟的 OpenAI 頁面登入，並輸入下方的一次性代碼。樹莓派不會開啟瀏覽器；完成後本頁會自動更新。</p><button className="oauth-code" onClick={() => void navigator.clipboard?.writeText(login.userCode)}><strong>{login.userCode}</strong><small>點一下複製</small></button><a className="primary oauth-open" href={login.verificationUrl} target="_blank" rel="noreferrer">開啟 OpenAI 登入頁<Icon name="arrow" /></a><div className="oauth-wait"><span className="loader" />等待 OpenAI 確認…</div>{providerError && <div className="oauth-error"><Icon name="warning" size={15} />{providerError}</div>}<button className="oauth-cancel" disabled={providerBusy} onClick={() => void cancelLogin()}>取消登入</button></section></div>}

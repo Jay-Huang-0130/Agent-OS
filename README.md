@@ -20,6 +20,7 @@ Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接�
 - Secretary UI 提供 Today、Waiting、Upcoming、Active Projects、Decision Queue、Commitment Ledger 與 Project Detail。
 - Project／Goal 建立和控制、Priority、Deadline、Autonomy、Attention Policy 與 Approval decision 都使用 durable API，不使用前端假資料。
 - Wake Engine 支援 durable claim、concurrency、misfire、startup reconciliation、exponential backoff、notification outbox 與 usage ledger。
+- Telegram Channel 支援 BotFather Bot、Long Polling、單一 owner 安全配對、雙向文字對話與可靠通知重試。
 - AI 可提交 owner-specific、版本化的 LOW-risk Python JSON Capability；production code 不硬編碼天氣、公車或地圖流程。
 - 單一聊天入口會自動判斷 execution mode；低信心與高風險要求先澄清，持續責任會建立版本化 Goal Contract、Plan IR 與 bounded Task Packet。
 - Codex app-server 支援 structured output、stream delta、interrupt，以及 durable model usage／error／timeout 紀錄。
@@ -209,6 +210,7 @@ bash ./install.sh --force-agent-web-update
 - [開發計劃表](docs/DEVELOPMENT-PLAN.md)：Phase 0–13 的完成狀態、待辦與主要里程碑。
 - [Agent Web 整合設計](docs/AGENT-WEB-INTEGRATION.md)：元件生命週期、能力探測、自動安裝、安全與未來 Adapter。
 - [OpenAI OAuth 整合](docs/OPENAI-OAUTH.md)：Codex app-server、headless 裝置代碼登入、隔離與 API。
+- [Telegram 通訊整合](docs/TELEGRAM.md)：BotFather、Token 安全保存、帳號配對、Long Polling 與雙向訊息。
 
 ## 專案狀態
 
