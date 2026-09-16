@@ -3,6 +3,8 @@ import { AgentClient, ApiError } from "./api/agentClient";
 import type {
   AutomationRecord,
   AutonomyLevel,
+  BrowserChallenge,
+  BrowserStatus,
   CapabilityRecord,
   CommitmentOwner,
   GoalDetail,
@@ -45,6 +47,20 @@ function errorMessage(error: unknown): string {
 function formatDate(value: string | null): string {
   if (!value) return "未設定";
   return new Intl.DateTimeFormat("zh-TW", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function eventLabel(type: string): string {
+  return ({
+    "goal.accepted": "已接受目標",
+    "goal.waiting_auth": "等待你完成瀏覽器登入",
+    "goal.auth_completed": "登入完成，繼續原任務",
+    "goal.blocked": "目標受阻",
+    "goal.completed": "目標已完成",
+    "goal.cancelled": "目標已取消",
+    "task.transitioned": "任務狀態更新",
+    "task.recovered": "重啟後恢復任務",
+    "plan.activated": "執行計畫已啟用",
+  } as Record<string, string>)[type] ?? type;
 }
 
 function priorityLabel(goal: GoalRecord): string {
@@ -260,10 +276,16 @@ function GoalDrawer({ goalId, automations, client, onClose, onChanged }: {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [watcherDetails, setWatcherDetails] = useState<Record<string, WatcherSnapshot>>({});
+  const [browserChallenges, setBrowserChallenges] = useState<BrowserChallenge[]>([]);
+  const [browserStatus, setBrowserStatus] = useState<BrowserStatus>();
   const load = async () => {
     try {
-      const next = await client.goalDetail(goalId);
+      const [next, challenges, status] = await Promise.all([
+        client.goalDetail(goalId), client.browserChallenges(), client.browserStatus(),
+      ]);
       setDetail(next);
+      setBrowserChallenges(challenges.filter((item) => item.goalId === goalId));
+      setBrowserStatus(status);
       const snapshots = await Promise.allSettled((next.watchers ?? []).map((watcher) => client.watcherDetail(watcher.id)));
       setWatcherDetails(Object.fromEntries(snapshots.flatMap((result) => result.status === "fulfilled" ? [[result.value.id, result.value]] : [])));
       setError("");
@@ -285,12 +307,14 @@ function GoalDrawer({ goalId, automations, client, onClose, onChanged }: {
   };
   const relatedAutomations = automations.filter((item) => item.goalId === goalId);
   const relatedWatchers = detail?.watchers ?? [];
+  const pendingBrowserChallenge = browserChallenges.find((item) => ["PENDING", "TAKEN_OVER"].includes(item.status));
   const activePlan = detail?.plans.find((plan) => plan.status === "ACTIVE") ?? detail?.plans[0];
   return <div className="secretary-drawer-layer" role="presentation" onMouseDown={onClose}><aside className="secretary-drawer goal-detail-drawer" onMouseDown={(event) => event.stopPropagation()}>{!detail ? <div className="secretary-loading"><span className="loader" />{error || "讀取 Goal 詳細資料…"}</div> : <>
     <header><div><div className="goal-detail-status"><span className={`goal-status ${detail.goal.status.toLowerCase()}`}>{statusLabels[detail.goal.status]}</span><span>Contract v{detail.goal.currentVersion}</span></div><h2>{detail.goal.title}</h2><p>{detail.goal.desiredOutcome}</p></div><button className="icon-only" onClick={onClose}><Icon name="close" /></button></header>
     {error && <div className="error-box"><Icon name="warning" />{error}</div>}
     <section className="goal-detail-overview"><div><span>優先順序</span><strong>{priorityLabel(detail.goal)}</strong></div><div><span>自主程度</span><strong>{autonomyLabels[detail.goal.autonomy]}</strong></div><div><span>截止時間</span><strong>{formatDate(detail.goal.contract.deadline)}</strong></div><div><span>更新時間</span><strong>{formatDate(detail.goal.updatedAt)}</strong></div></section>
     {detail.goal.stateReason && <div className="goal-state-reason"><Icon name="warning" size={16} /><span><strong>目前狀態說明</strong>{detail.goal.stateReason}</span></div>}
+    {pendingBrowserChallenge && <section className="browser-auth-gate"><div className="secretary-drawer-title"><h3>需要瀏覽器登入</h3><span>{pendingBrowserChallenge.type}</span></div><div className="browser-auth-card"><span><Icon name="key" /></span><div><strong>{pendingBrowserChallenge.origin}</strong><p>Agent 已保存 checkpoint 並停止操作；接管期間 Agent 不會控制或截圖瀏覽器。</p><small>驗證期限：{formatDate(pendingBrowserChallenge.expiresAt)}</small></div><div><button className="primary" disabled={busy || !browserStatus?.ready} onClick={async () => { setBusy(true); try { const takeover = await client.beginBrowserTakeover(pendingBrowserChallenge.id); window.open(takeover.takeoverUrl, "_blank", "noopener,noreferrer"); await load(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); } }}>安全接管瀏覽器</button><button className="secondary" disabled={busy || !browserStatus?.ready} onClick={async () => { setBusy(true); try { await client.completeBrowserChallenge(pendingBrowserChallenge.id); await Promise.all([load(), onChanged()]); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); } }}>我已完成登入</button></div></div>{!browserStatus?.ready && <div className="error-box"><Icon name="warning" />Browser Adapter 尚未連線，無法恢復這個 Goal。</div>}</section>}
     <section><div className="secretary-drawer-title"><h3>Responsibility Contract</h3><span>v{detail.goal.currentVersion}</span></div><div className="contract-grid"><article><h4>Agent 承諾</h4>{contractList(detail.goal.contract.agentCommitment, "沒有額外承諾")}</article><article><h4>完成條件</h4>{contractList(detail.goal.contract.completionCriteria, "沒有完成條件")}</article><article><h4>取消條件</h4>{contractList(detail.goal.contract.cancellationCriteria, "沒有取消條件")}</article><article><h4>外部依賴</h4>{contractList(detail.goal.contract.externalDependencies, "沒有外部依賴")}</article></div></section>
     <section><div className="secretary-drawer-title"><h3>Plan 與 Tasks</h3><span>{detail.tasks.length} Tasks</span></div>{activePlan && <div className="active-plan-summary"><span>Plan v{activePlan.version}</span><strong>{activePlan.status}</strong><small>{Array.isArray(activePlan.plan.nodes) ? activePlan.plan.nodes.length : 0} 個節點・建立於 {formatDate(activePlan.createdAt)}</small></div>}{detail.tasks.length ? <div className="goal-task-list">{detail.tasks.map((task, index) => {
       const criteria = Array.isArray(task.specification.completionCriteria) ? task.specification.completionCriteria.filter((item): item is string => typeof item === "string") : [];
@@ -299,7 +323,7 @@ function GoalDrawer({ goalId, automations, client, onClose, onChanged }: {
       return <article key={task.id}><div className="goal-task-index">{index + 1}</div><div><header><span>{task.kind}</span><b>{task.status}</b></header><h4>{task.title}</h4>{contractList(criteria, "未提供節點完成條件")}{budget && <small>預算：{String(budget.maxTokens ?? "—")} tokens・{String(budget.maxDurationMs ?? "—")} ms・最多 {String(budget.maxAttempts ?? "—")} 次</small>}{result && <div className="task-result"><strong>執行結果</strong><p>{typeof result.summary === "string" ? result.summary : JSON.stringify(result)}</p></div>}</div></article>;
     })}</div> : <EmptySection text="這個 Goal 尚未建立 Task" />}</section>
     <section><div className="secretary-drawer-title"><h3>Watcher、排程與 Wake</h3><span>{relatedWatchers.length} Watchers・{relatedAutomations.length} Automations・{detail.wakes.length} Wakes</span></div>{relatedWatchers.length > 0 && <div className="watcher-list">{relatedWatchers.map((watcher) => { const snapshot = watcherDetails[watcher.id]; const latest = snapshot?.observations[0]; return <article key={watcher.id}><span className="automation-mode code"><Icon name="eye" /></span><div><div><strong>{watcher.status}</strong><small>{watcher.consecutiveFailures ? `${watcher.consecutiveFailures} 次連續失敗` : "來源正常"}</small></div><a href={watcher.sourceUrl} target="_blank" rel="noreferrer">{watcher.sourceUrl}</a><p>每 {Math.round(watcher.intervalSeconds / 60)} 分鐘・下次 {formatDate(watcher.nextCheckAt)}</p><small>模型：{watcher.semanticReview ? `只在變更時分析・${watcher.modelTokensUsed}/${watcher.modelTokenBudget} tokens` : "不使用"}・{snapshot?.checkpoints.length ?? 0} checkpoints・指紋 {watcher.lastFingerprint?.slice(0, 10) ?? "尚未建立"}</small>{latest && <details className="watcher-result"><summary><b>{latest.status}</b><span>{latest.summary}</span><time>{formatDate(latest.checkedAt)}</time></summary><div><h5>Delta</h5><pre>{JSON.stringify(latest.delta, null, 2)}</pre><h5>Evidence</h5>{latest.evidence.length ? <ul>{latest.evidence.map((item, index) => <li key={index}><strong>{String(item.kind ?? "EVIDENCE")}</strong><span>{String(item.summary ?? "")}</span><code>{String(item.reference ?? "")}</code></li>)}</ul> : <p>這次檢查沒有 Evidence。</p>}</div></details>}</div>{watcher.status === "ACTIVE" && <div className="watcher-actions"><button className="secondary" disabled={busy} onClick={async () => { setBusy(true); try { await client.checkWatcher(watcher.id); await load(); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); } }}>立即檢查</button><button className="danger-link" disabled={busy} onClick={async () => { setBusy(true); try { await client.cancelWatcher(watcher.id); await Promise.all([load(), onChanged()]); } catch (cause) { setError(errorMessage(cause)); } finally { setBusy(false); } }}>取消</button></div>}</article>; })}</div>}{relatedAutomations.length ? <div className="goal-automation-list">{relatedAutomations.map((automation) => <article key={automation.id}><span className={`automation-mode ${automation.executionMode === "AI_EXECUTION" ? "ai" : "code"}`}><Icon name={automation.executionMode === "AI_EXECUTION" ? "model" : "activity"} /></span><div><strong>{automation.executionMode}</strong><p>{scheduleLabel(automation)}</p><small>{automation.status}・{automation.timezone}</small></div></article>)}</div> : relatedWatchers.length === 0 && <EmptySection text="這個 Goal 沒有 Watcher 或自動排程" />}{detail.wakes.length > 0 && <div className="goal-wake-list">{detail.wakes.map((wake) => <div key={wake.id}><span>{wake.type}</span><strong>{wake.status}</strong><small>{wake.dueAt ? formatDate(wake.dueAt) : "事件觸發"}</small></div>)}</div>}</section>
-    <section><div className="secretary-drawer-title"><h3>Timeline</h3><span>{detail.timeline.length}</span></div><div className="secretary-timeline">{detail.timeline.map((event) => <div key={event.id}><i /><span><strong>{event.type}</strong><small>{formatDate(event.occurredAt)}・{event.actor}</small></span></div>)}</div></section>
+    <section><div className="secretary-drawer-title"><h3>Timeline</h3><span>{detail.timeline.length}</span></div><div className="secretary-timeline">{detail.timeline.map((event) => <div key={event.id}><i /><span><strong>{eventLabel(event.type)}</strong><small>{formatDate(event.occurredAt)}・{event.actor}</small></span></div>)}</div></section>
     <footer className="goal-detail-actions">{detail.goal.status === "ACTIVE" && <button className="secondary" disabled={busy} onClick={() => void act("pause")}>暫停 Goal</button>}{["WAITING", "BLOCKED"].includes(detail.goal.status) && <button className="primary" disabled={busy} onClick={() => void act("resume")}>恢復 Goal</button>}{!["COMPLETED", "CANCELLED"].includes(detail.goal.status) && <button className="danger-link" disabled={busy} onClick={() => void act("cancel")}>取消 Goal</button>}</footer>
   </>}</aside></div>;
 }

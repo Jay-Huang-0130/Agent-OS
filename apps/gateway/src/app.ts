@@ -5,6 +5,7 @@ import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import fastifyStatic from "@fastify/static";
 import fastifyWebsocket from "@fastify/websocket";
 import { z } from "zod";
+import { AgentWebCliAdapter, BrowserAdapterError, BrowserPhase8Service, type BrowserAdapter } from "./agentWeb.js";
 import {
   clearSessionCookie,
   createSession,
@@ -191,6 +192,7 @@ export interface BuildAppOptions {
   aiWakeExecutor?: AiWakeExecutor;
   wakeEngine?: Omit<WakeEngineOptions, "notify" | "aiExecutor">;
   watcherFetcher?: WatcherFetcher;
+  browserAdapter?: BrowserAdapter;
   startWakeEngine?: boolean;
   startPlanRunner?: boolean;
   startWatcherEngine?: boolean;
@@ -331,6 +333,10 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       }
     }
   };
+  const browserService = new BrowserPhase8Service(database, kernel,
+    options.browserAdapter ?? new AgentWebCliAdapter(config.agentWebController),
+    (item) => broadcast({ type: "notification.created", data: item }));
+  await browserService.initialize();
   const openAIAuth = options.openAIAuth ?? new CodexAuthBridge(config);
   const authRuntime = typeof (openAIAuth as Partial<ModelRuntime>).run === "function"
     ? openAIAuth as OpenAIAuthService & ModelRuntime : undefined;
@@ -342,7 +348,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   if (watcherEngineEnabled) watcherService.start();
   const requestRouter = options.requestRouter ?? (modelRuntime ? new Phase6RequestRouter(modelRuntime) : undefined);
   const planRunner = modelRuntime ? new ImmediatePlanRunner(database, kernel, modelRuntime,
-    (event) => broadcast(event)) : undefined;
+    (event) => broadcast(event), browserService) : undefined;
   const planRunnerEnabled = options.startPlanRunner ?? options.startWakeEngine !== false;
   if (planRunner && planRunnerEnabled) planRunner.start();
   const assistantExecution = modelRuntime
@@ -369,7 +375,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   const assistantIntake = requestRouter
     ? new AssistantIntakeService(database, requestRouter, options.requestRouter ? undefined : assistantExecution)
     : new AssistantIntakeService(database);
-  const aiWakeExecutor = options.aiWakeExecutor ?? (modelRuntime ? new ModelAiWakeExecutor(modelRuntime, database, kernel) : undefined);
+  const aiWakeExecutor = options.aiWakeExecutor ?? (modelRuntime ? new ModelAiWakeExecutor(modelRuntime, database, kernel, browserService) : undefined);
   const wakeEngine = new WakeEngine(database, capabilityService, capabilityExecutor, {
     ...options.wakeEngine,
     ...(aiWakeExecutor ? { aiExecutor: aiWakeExecutor } : {}),
@@ -510,16 +516,25 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
   app.get("/api/v1/notifications", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session) return;
-    const rows = database.db.prepare(`SELECT * FROM watcher_notifications WHERE owner_user_id = ?
-      ORDER BY created_at DESC LIMIT 200`).all(session.userId) as Array<Record<string, unknown>>;
-    return rows.map((row) => ({ id: String(row.id), title: String(row.title), detail: String(row.body), kind: "task",
-      createdAt: String(row.created_at), read: row.read_at !== null, goalId: String(row.goal_id), watcherId: String(row.watcher_id) }));
+    const rows = database.db.prepare(`SELECT id, title, body, created_at, read_at, goal_id, watcher_id,
+        NULL AS task_id, NULL AS challenge_id, 'task' AS kind FROM watcher_notifications WHERE owner_user_id = ?
+      UNION ALL
+      SELECT id, title, body, created_at, read_at, goal_id, NULL AS watcher_id,
+        task_id, challenge_id, 'attention' AS kind FROM browser_notifications WHERE owner_user_id = ?
+      ORDER BY created_at DESC LIMIT 200`).all(session.userId, session.userId) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({ id: String(row.id), title: String(row.title), detail: String(row.body), kind: String(row.kind),
+      createdAt: String(row.created_at), read: row.read_at !== null, goalId: String(row.goal_id),
+      ...(row.watcher_id ? { watcherId: String(row.watcher_id) } : {}),
+      ...(row.task_id ? { taskId: String(row.task_id) } : {}),
+      ...(row.challenge_id ? { challengeId: String(row.challenge_id) } : {}) }));
   });
 
   app.post<{ Params: { id: string } }>("/api/v1/notifications/:id/read", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
     database.db.prepare(`UPDATE watcher_notifications SET read_at = COALESCE(read_at, ?)
+      WHERE id = ? AND owner_user_id = ?`).run(new Date().toISOString(), request.params.id, session.userId);
+    database.db.prepare(`UPDATE browser_notifications SET read_at = COALESCE(read_at, ?)
       WHERE id = ? AND owner_user_id = ?`).run(new Date().toISOString(), request.params.id, session.userId);
     return reply.code(204).send();
   });
@@ -528,6 +543,8 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
     database.db.prepare(`UPDATE watcher_notifications SET read_at = COALESCE(read_at, ?)
+      WHERE owner_user_id = ?`).run(new Date().toISOString(), session.userId);
+    database.db.prepare(`UPDATE browser_notifications SET read_at = COALESCE(read_at, ?)
       WHERE owner_user_id = ?`).run(new Date().toISOString(), session.userId);
     return reply.code(204).send();
   });
@@ -728,6 +745,58 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     }
   });
 
+  const browserApiError = (reply: FastifyReply, error: unknown) => {
+    if (error instanceof BrowserAdapterError) {
+      const status = error.code === "unavailable" ? 503 : error.code === "unsafe_input" ? 404 : 409;
+      return apiError(reply, status, `browser_${error.code}`, error.message);
+    }
+    throw error;
+  };
+
+  app.get("/api/v1/browser/status", async (request, reply) => {
+    if (!requireSession(request, reply, database)) return;
+    await browserService.initialize();
+    return browserService.health();
+  });
+
+  app.get("/api/v1/browser/challenges", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return browserService.listChallenges(session.userId);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/browser/challenges/:id/takeover", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const host = request.headers.host;
+    if (!host) return apiError(reply, 400, "host_required", "A valid Host header is required.");
+    try {
+      return await browserService.beginTakeover(request.params.id, session.userId, `${secure ? "https" : "http"}://${host}`);
+    } catch (error) { return browserApiError(reply, error); }
+  });
+
+  app.get<{ Params: { token: string } }>("/api/v1/browser/takeovers/:token", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const host = request.headers.host;
+    if (!host) return apiError(reply, 400, "host_required", "A valid Host header is required.");
+    try {
+      const takeover = await browserService.resolveTakeover(request.params.token, session.userId, `${secure ? "https" : "http"}://${host}`);
+      return reply.redirect(takeover.url);
+    } catch (error) { return browserApiError(reply, error); }
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/browser/challenges/:id/complete", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    try {
+      const challenge = await browserService.completeChallenge(request.params.id, session.userId);
+      planRunner?.enqueue(session.userId, challenge.goalId);
+      broadcast({ type: "browser.auth.completed", data: challenge });
+      return challenge;
+    } catch (error) { return browserApiError(reply, error); }
+  });
+
   app.post("/api/v1/projects", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
@@ -818,6 +887,23 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     const parsed = goalActionSchema.safeParse(request.body ?? {});
     if (!parsed.success) return apiError(reply, 400, "invalid_goal_action", "The Goal action is invalid.");
     try {
+      if (action === "resume") {
+        await browserService.initialize();
+        const current = kernel.getGoal(request.params.id, session.userId);
+        if (current.status === "WAITING_AUTH") {
+          return apiError(reply, 409, "browser_authentication_required",
+            "Complete the pending browser authentication challenge before resuming this Goal.");
+        }
+        const blocked = database.db.prepare("SELECT id, specification_json FROM tasks WHERE goal_id = ? AND status = 'BLOCKED'")
+          .all(request.params.id) as Array<Record<string, unknown>>;
+        for (const row of blocked) {
+          const specification = JSON.parse(String(row.specification_json ?? "{}")) as Record<string, unknown>;
+          const required = Array.isArray(specification.allowedTools) ? specification.allowedTools.filter((item): item is string => typeof item === "string") : [];
+          const missing = required.filter((tool) => !browserService.has(tool));
+          if (missing.length) return apiError(reply, 409, "required_tools_unavailable", `Required tools are unavailable: ${missing.join(", ")}.`);
+        }
+        for (const row of blocked) kernel.transitionTask(String(row.id), "READY", session.userId, { reason: "required_tools_available" });
+      }
       const reason = parsed.data.reason;
       const goal = action === "pause"
         ? kernel.pauseGoal(request.params.id, session.userId, reason, key)

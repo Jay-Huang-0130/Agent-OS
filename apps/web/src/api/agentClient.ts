@@ -6,6 +6,9 @@ import type {
   AgentEvent,
   ModelOption,
   BootstrapResponse,
+  BrowserChallenge,
+  BrowserStatus,
+  BrowserTakeover,
   CapabilityRecord,
   ConnectionState,
   CommitmentOwner,
@@ -158,6 +161,26 @@ export class AgentClient {
     return this.request<AutomationRecord>(`/api/v1/automations/${encodeURIComponent(id)}/cancel`, {
       method: "POST",
       body: JSON.stringify({}),
+    }, true);
+  }
+
+  browserStatus(): Promise<BrowserStatus> {
+    return this.request<BrowserStatus>("/api/v1/browser/status");
+  }
+
+  browserChallenges(): Promise<BrowserChallenge[]> {
+    return this.request<BrowserChallenge[]>("/api/v1/browser/challenges");
+  }
+
+  beginBrowserTakeover(id: string): Promise<BrowserTakeover> {
+    return this.request<BrowserTakeover>(`/api/v1/browser/challenges/${encodeURIComponent(id)}/takeover`, {
+      method: "POST", body: JSON.stringify({}),
+    }, true);
+  }
+
+  completeBrowserChallenge(id: string): Promise<BrowserChallenge> {
+    return this.request<BrowserChallenge>(`/api/v1/browser/challenges/${encodeURIComponent(id)}/complete`, {
+      method: "POST", body: JSON.stringify({}),
     }, true);
   }
 

@@ -841,6 +841,21 @@ export class ResponsibilityKernel {
     return this.transitionGoal(id, ownerUserId, "ACTIVE", "goal.resumed", reason, idempotencyKey);
   }
 
+  waitGoalForAuthentication(id: string, ownerUserId: string, challengeId: string): GoalRecord {
+    const goal = this.getGoal(id, ownerUserId);
+    if (goal.status === "WAITING_AUTH") return goal;
+    return this.transitionGoal(id, ownerUserId, "WAITING_AUTH", "goal.waiting_auth",
+      `Browser authentication challenge ${challengeId} requires the owner.`, `auth-wait:${challengeId}`);
+  }
+
+  resumeGoalAfterAuthentication(id: string, ownerUserId: string, challengeId: string): GoalRecord {
+    const goal = this.getGoal(id, ownerUserId);
+    if (goal.status === "ACTIVE") return goal;
+    if (goal.status !== "WAITING_AUTH") throw new KernelError("invalid_transition", `Goal is not waiting for authentication (${goal.status}).`);
+    return this.transitionGoal(id, ownerUserId, "ACTIVE", "goal.auth_completed",
+      "Browser authentication completed; the original task may resume.", `auth-complete:${challengeId}`);
+  }
+
   cancelGoal(id: string, ownerUserId: string, reason = "Cancelled by the owner.", idempotencyKey?: string): GoalRecord {
     const goal = this.getGoal(id, ownerUserId);
     if (goal.status === "COMPLETED" || goal.status === "CANCELLED") {
@@ -1368,6 +1383,19 @@ export class ResponsibilityKernel {
       });
       return this.requireTask(id);
     });
+  }
+
+  waitTaskForAuthentication(id: string, actor: string, challengeId: string): TaskRecord {
+    const task = this.requireTask(id);
+    if (task.status === "WAITING_AUTH") return task;
+    return this.transitionTask(id, "WAITING_AUTH", actor, { challengeId, reason: "browser_authentication_required" });
+  }
+
+  resumeTaskAfterAuthentication(id: string, actor: string, challengeId: string): TaskRecord {
+    const task = this.requireTask(id);
+    if (task.status === "READY") return task;
+    if (task.status !== "WAITING_AUTH") throw new KernelError("invalid_transition", `Task is not waiting for authentication (${task.status}).`);
+    return this.transitionTask(id, "READY", actor, { challengeId, reason: "browser_authentication_completed" });
   }
 
   acquireLease(resourceType: string, resourceId: string, holderId: string, ttlMs: number): LeaseRecord | undefined {

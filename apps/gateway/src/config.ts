@@ -1,4 +1,5 @@
 import { homedir, hostname } from "node:os";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export interface GatewayConfig {
@@ -10,6 +11,7 @@ export interface GatewayConfig {
   codexHome: string;
   codexEntrypoint: string;
   pythonExecutable: string;
+  agentWebController: string;
   webDistPath: string;
   tlsCertPath?: string;
   tlsKeyPath?: string;
@@ -31,6 +33,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
 
   const tlsCertPath = process.env.AGENT_OS_TLS_CERT_FILE;
   const tlsKeyPath = process.env.AGENT_OS_TLS_KEY_FILE;
+  const localAgentWebController = join(homedir(), ".local", "bin", "agent-webctl");
 
   return {
     host: process.env.AGENT_OS_HOST ?? "0.0.0.0",
@@ -45,6 +48,8 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
       ? resolve(process.env.AGENT_OS_CODEX_ENTRYPOINT)
       : resolve(process.cwd(), "node_modules", "@openai", "codex", "bin", "codex.js"),
     pythonExecutable: process.env.AGENT_OS_PYTHON ?? (process.platform === "win32" ? "python" : "python3"),
+    agentWebController: process.env.AGENT_OS_BROWSER_CTL
+      ?? (existsSync(localAgentWebController) ? localAgentWebController : "agent-webctl"),
     webDistPath: process.env.AGENT_OS_WEB_DIST
       ? resolve(process.env.AGENT_OS_WEB_DIST)
       : resolve(process.cwd(), "apps", "web", "dist"),

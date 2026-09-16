@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BrowserTaskWaitingForAuth } from "./agentWeb.js";
 import type { AgentDatabase } from "./database.js";
 import type { AssistantExecution, AssistantExecutionResult, ExecutionMode, RequestRouter, RouterResult } from "./assistantIntake.js";
 import type { ModelRunRequest, ModelRuntime } from "./modelRuntime.js";
@@ -152,7 +153,7 @@ export class GoalCompiler {
       purpose: "GOAL_COMPILER", ownerUserId: input.ownerUserId, requestId: input.requestId,
       ...(input.model ? { model: input.model } : {}),
       instructions: `Compile a versioned Responsibility Contract and bounded Plan IR. Requested execution mode: ${input.mode}.
-For a fixed schedule, generate a LOW-risk Python JSON capability only when the work is short, deterministic, testable and needs no judgment. Otherwise choose AI_EXECUTION. For CHANGE_WATCHER or HYBRID_GOAL with a concrete public HTTP source, put sourceUrl, intervalSeconds, semanticReview and optional endAt in constraints; do not invent a URL. Never invent credentials. Every node needs measurable completion criteria and hard budgets.`,
+For a fixed schedule, generate a LOW-risk Python JSON capability only when the work is short, deterministic, testable and needs no judgment. Otherwise choose AI_EXECUTION. For CHANGE_WATCHER or HYBRID_GOAL with a concrete public HTTP source, put sourceUrl, intervalSeconds, semanticReview and optional endAt in constraints; do not invent a URL. Browser nodes may request only these exact tools when needed: web.open, web.snapshot, web.click, web.find, web.download. Never invent tool names or credentials. Every node needs measurable completion criteria and hard budgets.`,
       input: `Current time: ${now.toISOString()}\nTimezone: ${input.timezone}\n${input.conversationContext ? `Conversation so far:\n${input.conversationContext}\n` : ""}Latest user message: ${input.message}\n\nReturn constraintsJson, priorityJson, attentionPolicyJson and budgetJson as JSON object strings. Return automationJson as an empty string when no schedule is needed, otherwise as JSON matching the automation proposal contract.`,
       outputSchema: compiledGoalJsonSchema,
       parse: (value) => parseCompiledGoal(value, { message: input.message, timezone: input.timezone, now }), timeoutMs: 90_000,
@@ -344,38 +345,73 @@ export const resultEnvelopeSchema = z.object({
 }).strict();
 export type ResultEnvelope = z.infer<typeof resultEnvelopeSchema>;
 
+export interface WorkerToolRegistry {
+  availableTools(): ReadonlySet<string>;
+  execute(name: string, args: Record<string, unknown>, context: {
+    ownerUserId: string; goalId: string; taskId: string;
+  }): Promise<unknown>;
+}
+
+const workerTurnSchema = resultEnvelopeSchema.extend({
+  status: z.enum(["COMPLETED", "BLOCKED", "FAILED", "TOOL_CALL"]),
+  toolCall: z.object({ name: z.string().min(1), arguments: z.record(z.unknown()) }).strict().optional().nullable(),
+});
+
 export class BoundedAgentWorker {
-  constructor(private readonly runtime: ModelRuntime, private readonly availableTools: ReadonlySet<string> = new Set()) {}
+  constructor(private readonly runtime: ModelRuntime,
+    private readonly toolRegistry?: WorkerToolRegistry | ReadonlySet<string>) {}
   async execute(packet: { ownerUserId: string; goalId: string; taskId: string; objective: string; context: Record<string, unknown>;
     model?: string; allowedTools: string[]; budget: { maxTokens: number; maxDurationMs: number; maxAttempts: number } }): Promise<ResultEnvelope> {
-    const missingTools = packet.allowedTools.filter((tool) => !this.availableTools.has(tool));
+    const availableTools = this.toolRegistry && "availableTools" in this.toolRegistry
+      ? this.toolRegistry.availableTools() : this.toolRegistry ?? new Set<string>();
+    const missingTools = packet.allowedTools.filter((tool) => !availableTools.has(tool));
     if (missingTools.length) return {
       status: "BLOCKED",
       summary: `這個 Task 需要尚未連接的工具：${missingTools.join(", ")}。`,
       outputs: [], evidence: [], nextActions: ["連接對應 Tool provider 後恢復 Goal。"],
     };
     const schema = { type: "object", additionalProperties: false, required: ["status", "summary", "outputs", "evidence", "nextActions"],
-      properties: { status: { type: "string", enum: ["COMPLETED", "BLOCKED", "FAILED"] }, summary: { type: "string" },
+      properties: { status: { type: "string", enum: ["COMPLETED", "BLOCKED", "FAILED", "TOOL_CALL"] }, summary: { type: "string" },
         outputs: { type: "array", items: { type: "object", additionalProperties: false, required: ["name", "value"],
           properties: { name: { type: "string" }, value: { type: "string" } } } },
         evidence: { type: "array", items: { type: "object", additionalProperties: false, required: ["kind", "reference", "summary"],
           properties: { kind: { type: "string", enum: ["ARTIFACT", "OBSERVATION", "SOURCE", "TEST"] }, reference: { type: "string" }, summary: { type: "string" } } } },
-        nextActions: { type: "array", items: { type: "string" } } } };
+        nextActions: { type: "array", items: { type: "string" } },
+        toolCall: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["name", "arguments"],
+          properties: { name: { type: "string" }, arguments: { type: "object" } } }] } } };
     let lastError: unknown;
     for (let attempt = 1; attempt <= packet.budget.maxAttempts; attempt += 1) {
       try {
-        const result = await this.runtime.run({ purpose: "WORKER", ownerUserId: packet.ownerUserId, goalId: packet.goalId, taskId: packet.taskId,
-          ...(packet.model ? { model: packet.model } : {}),
-          instructions: `Complete only the Task Packet. Allowed tool identifiers: ${packet.allowedTools.join(", ") || "none"}.
+        const toolResults: Array<{ name: string; arguments: Record<string, unknown>; result: unknown }> = [];
+        for (let step = 0; step < 16; step += 1) {
+          const result = await this.runtime.run({ purpose: "WORKER", ownerUserId: packet.ownerUserId, goalId: packet.goalId, taskId: packet.taskId,
+            ...(packet.model ? { model: packet.model } : {}),
+            instructions: `Complete only the Task Packet. Allowed tool identifiers: ${packet.allowedTools.join(", ") || "none"}.
 Tool identifiers are policy metadata, not proof that a tool is connected. Do not claim browsing, API calls, file access or other tool work unless the runtime actually provided and executed that tool. If required evidence cannot be obtained with the connected runtime, return BLOCKED with the missing capability in nextActions. Return evidence; prose alone cannot complete a task.`,
-          input: JSON.stringify({ objective: packet.objective, context: packet.context }), outputSchema: schema,
-          parse: (value) => resultEnvelopeSchema.parse(value), timeoutMs: packet.budget.maxDurationMs, maxOutputTokens: packet.budget.maxTokens });
-        if (result.usage.outputTokens > packet.budget.maxTokens) throw new ModelRuntimeError("provider_error", "Worker exceeded its token budget.", false);
-        if (result.output.status === "COMPLETED" && result.output.evidence.length === 0) {
-          throw new ModelRuntimeError("invalid_output", "Completion requires at least one evidence item.", false);
+            input: JSON.stringify({ objective: packet.objective, context: packet.context, toolResults }), outputSchema: schema,
+            parse: (value) => workerTurnSchema.parse(value), timeoutMs: packet.budget.maxDurationMs, maxOutputTokens: packet.budget.maxTokens });
+          if (result.usage.outputTokens > packet.budget.maxTokens) throw new ModelRuntimeError("provider_error", "Worker exceeded its token budget.", false);
+          if (result.output.status === "TOOL_CALL") {
+            const call = result.output.toolCall;
+            if (!call || !packet.allowedTools.includes(call.name) || !this.toolRegistry || !("execute" in this.toolRegistry)) {
+              throw new ModelRuntimeError("invalid_output", "Worker requested an unavailable or unauthorized tool.", false);
+            }
+            const toolResult = await this.toolRegistry.execute(call.name, call.arguments,
+              { ownerUserId: packet.ownerUserId, goalId: packet.goalId, taskId: packet.taskId });
+            toolResults.push({ name: call.name, arguments: call.arguments, result: toolResult });
+            continue;
+          }
+          if (result.output.status === "COMPLETED" && result.output.evidence.length === 0) {
+            throw new ModelRuntimeError("invalid_output", "Completion requires at least one evidence item.", false);
+          }
+          const { toolCall: _toolCall, ...envelope } = result.output;
+          return resultEnvelopeSchema.parse(envelope);
         }
-        return result.output;
-      } catch (error) { lastError = error; }
+        throw new ModelRuntimeError("provider_error", "Worker exceeded the maximum tool-call steps.", false);
+      } catch (error) {
+        if (error instanceof BrowserTaskWaitingForAuth) throw error;
+        lastError = error;
+      }
     }
     throw lastError;
   }
@@ -418,8 +454,8 @@ export class PlanManager {
   private readonly worker: BoundedAgentWorker;
   private readonly verifier = new TaskVerifier();
   constructor(private readonly database: AgentDatabase, private readonly kernel: ResponsibilityKernel, runtime: ModelRuntime,
-    availableTools: ReadonlySet<string> = new Set()) {
-    this.worker = new BoundedAgentWorker(runtime, availableTools);
+    toolRegistry?: WorkerToolRegistry | ReadonlySet<string>) {
+    this.worker = new BoundedAgentWorker(runtime, toolRegistry);
   }
 
   async executeTask(ownerUserId: string, taskId: string): Promise<ResultEnvelope> {
@@ -440,12 +476,22 @@ export class PlanManager {
         context: buildManagerContext(this.database, task.goalId), allowedTools,
         budget: { maxTokens: Number(rawBudget?.maxTokens ?? 2_000), maxDurationMs: Number(rawBudget?.maxDurationMs ?? 90_000),
           maxAttempts: Number(rawBudget?.maxAttempts ?? 2) } });
+      if (envelope.status === "BLOCKED") {
+        this.kernel.transitionTask(task.id, "BLOCKED", ownerUserId, envelope);
+        this.kernel.blockGoal(task.goalId, ownerUserId, envelope.summary);
+        return envelope;
+      }
       this.kernel.transitionTask(task.id, "VERIFYING", ownerUserId, envelope);
       const verified = this.verifier.verify(envelope, criteria);
       this.kernel.transitionTask(task.id, verified.accepted ? "COMPLETED" : "FAILED", ownerUserId,
         verified.accepted ? envelope : { ...envelope, verification: verified });
       return envelope;
     } catch (error) {
+      if (error instanceof BrowserTaskWaitingForAuth) {
+        this.kernel.waitTaskForAuthentication(task.id, ownerUserId, error.challenge.id);
+        this.kernel.waitGoalForAuthentication(task.goalId, ownerUserId, error.challenge.id);
+        return { status: "BLOCKED", summary: error.message, outputs: [], evidence: [], nextActions: ["Complete browser authentication."] };
+      }
       this.kernel.transitionTask(task.id, "FAILED", ownerUserId, { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
@@ -463,7 +509,8 @@ export class ImmediatePlanRunner {
     private readonly kernel: ResponsibilityKernel,
     runtime: ModelRuntime,
     private readonly emit?: (event: { type: string; data: GoalRecord }) => void,
-  ) { this.manager = new PlanManager(database, kernel, runtime); }
+    toolRegistry?: WorkerToolRegistry,
+  ) { this.manager = new PlanManager(database, kernel, runtime, toolRegistry); }
 
   start(intervalMs = 1_000): void {
     if (this.timer) return;
@@ -571,8 +618,9 @@ function resultSummary(result: unknown): string {
 
 export class ModelAiWakeExecutor implements AiWakeExecutor {
   private readonly manager: PlanManager;
-  constructor(private readonly runtime: ModelRuntime, private readonly database: AgentDatabase, kernel: ResponsibilityKernel) {
-    this.manager = new PlanManager(database, kernel, runtime);
+  constructor(private readonly runtime: ModelRuntime, private readonly database: AgentDatabase, kernel: ResponsibilityKernel,
+    toolRegistry?: WorkerToolRegistry) {
+    this.manager = new PlanManager(database, kernel, runtime, toolRegistry);
   }
   async execute(input: { goalId: string; automationId: string; input: unknown }) {
     const goal = this.database.db.prepare("SELECT owner_user_id, desired_outcome FROM goals WHERE id = ?").get(input.goalId) as Record<string, unknown>;

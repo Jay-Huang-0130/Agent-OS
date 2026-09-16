@@ -60,15 +60,16 @@
   - ~~跨重啟恢復、失敗退避、Token Budget、期限到才完成 Goal。~~
   - 詳細驗收：[Phase 7](PHASE-7.md)
 
-- [ ] **Phase 8：Agent-Web Browser Authentication Gate**
-  - [ ] 建立可替換的 Browser Adapter：navigate、snapshot、act、download。
-  - [ ] 建立 Tool Registry，讓 `web.open`、`web.click`、`web.find` 對應真實工具，而非只有名稱。
-  - [ ] Browser Session／Profile opaque reference、Task checkpoint 與 Agent lease。
-  - [ ] 登入、MFA、CAPTCHA 時進入 `WAITING_AUTH`。
-  - [ ] 建立短效 User Takeover，確保人與 Agent 不會同時控制瀏覽器。
-  - [ ] 使用者完成登入後，以 `AUTH_COMPLETED` Wake 恢復原 Task。
-  - [ ] 缺少 Browser capability 時顯示 `BLOCKED`，停用無效的「恢復 Goal」。
-  - [ ] Timeline 將內部 transition 轉成可讀的執行紀錄。
+- [x] ~~**Phase 8：Agent-Web Browser Authentication Gate**~~
+  - [x] ~~建立可替換的 Browser Adapter：navigate、snapshot、act、download。~~
+  - [x] ~~建立 Tool Registry，讓 `web.open`、`web.click`、`web.find` 對應真實工具，而非只有名稱。~~
+  - [x] ~~Browser Session／Profile opaque reference、Task checkpoint 與 Agent lease。~~
+  - [x] ~~登入、MFA、CAPTCHA 時進入 `WAITING_AUTH`。~~
+  - [x] ~~建立短效 User Takeover，確保人與 Agent 不會同時控制瀏覽器。~~
+  - [x] ~~使用者完成登入後，以 `AUTH_COMPLETED` Wake 恢復原 Task。~~
+  - [x] ~~缺少 Browser capability 時顯示 `BLOCKED`，停用無效的「恢復 Goal」。~~
+  - [x] ~~Timeline 將內部 transition 轉成可讀的執行紀錄。~~
+  - 詳細驗收：[Phase 8](PHASE-8.md)
 
 - [ ] **Phase 9：Attention、Agenda 與 Briefing**
   - [ ] Calendar event 與 availability 資料模型。
@@ -108,7 +109,7 @@
 ## 主要里程碑
 
 - [x] ~~**Kernel MVP（Phase 5）**：責任、Portfolio、Commitment、排程與跨重啟恢復。~~
-- [ ] **Agent MVP（Phase 8）**：自然語言 Goal、長期 Watcher、真實 Browser Tool、登入接管與恢復。
+- [x] ~~**Agent MVP（Phase 8）**：自然語言 Goal、長期 Watcher、真實 Browser Tool、登入接管與恢復。~~
 - [ ] **Secretary MVP（Phase 9）**：跨 Project 排序、注意力管理、Daily Brief 與 Weekly Review。
 - [ ] **Safe Capability Platform（Phase 10）**：安全檔案操作與完整 Capability lifecycle。
 - [ ] **Learning Agent-OS（Phase 12）**：可量測、可回滾、需人工批准的改善流程。
@@ -116,7 +117,7 @@
 
 ## 現在的下一步
 
-目前只開始 **Phase 8**。完成標準是：
+Phase 8 已完成；下一步只開始 **Phase 9**。Phase 8 的完成標準是：
 
 1. Agent 能以真實 Browser Adapter 執行公開網頁任務。
 2. 遇到登入、MFA 或 CAPTCHA 時安全停止，不把秘密交給模型。

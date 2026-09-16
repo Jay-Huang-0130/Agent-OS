@@ -41,8 +41,10 @@ read_agent_web_info() {
 
 agent_web_info=$(read_agent_web_info || true)
 ready=$(printf '%s\n' "$agent_web_info" | info_value READY)
-if [[ "$ready" == true && $force_update -eq 0 ]]; then
-    echo "Agent Web is already installed and ready."
+control_available=$(printf '%s\n' "$agent_web_info" | info_value AGENT_CONTROL_AVAILABLE)
+control_protocol=$(printf '%s\n' "$agent_web_info" | info_value AGENT_CONTROL_PROTOCOL)
+if [[ "$ready" == true && "$control_available" == true && "$control_protocol" == agent-web-adapter-v1 && $force_update -eq 0 ]]; then
+    echo "Agent Web is already installed with the Phase 8 control adapter."
 else
     already_installed=0
     command -v agent-webctl >/dev/null 2>&1 && already_installed=1
@@ -78,8 +80,10 @@ else
 
     agent_web_info=$(read_agent_web_info || true)
     ready=$(printf '%s\n' "$agent_web_info" | info_value READY)
-    if [[ "$ready" != true ]]; then
-        echo "Agent Web installation finished but readiness verification failed." >&2
+    control_available=$(printf '%s\n' "$agent_web_info" | info_value AGENT_CONTROL_AVAILABLE)
+    control_protocol=$(printf '%s\n' "$agent_web_info" | info_value AGENT_CONTROL_PROTOCOL)
+    if [[ "$ready" != true || "$control_available" != true || "$control_protocol" != agent-web-adapter-v1 ]]; then
+        echo "Agent Web installation finished but the Phase 8 adapter verification failed." >&2
         printf '%s\n' "$agent_web_info" >&2
         exit 70
     fi
@@ -109,6 +113,8 @@ cat >"$state_root/agent-web.env" <<EOF
 COMPONENT=agent-web
 READY=true
 INFO_VERSION=$(printf '%s\n' "$agent_web_info" | info_value AGENT_WEB_INFO_VERSION)
+AGENT_CONTROL_AVAILABLE=$control_available
+AGENT_CONTROL_PROTOCOL=$control_protocol
 SOURCE_COMMIT=$source_commit
 VERIFIED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF

@@ -53,6 +53,34 @@ export interface NotificationItem {
   taskId?: string;
   goalId?: string;
   watcherId?: string;
+  challengeId?: string;
+}
+
+export interface BrowserStatus {
+  ready: boolean;
+  protocol: string | null;
+  humanUrl: string | null;
+  capabilities: string[];
+  detail?: string;
+}
+
+export interface BrowserChallenge {
+  id: string;
+  goalId: string;
+  taskId: string;
+  sessionId: string;
+  type: "LOGIN" | "MFA" | "CAPTCHA" | "UNKNOWN";
+  origin: string;
+  status: "PENDING" | "TAKEN_OVER" | "COMPLETED" | "EXPIRED" | "CANCELLED";
+  createdAt: string;
+  expiresAt: string;
+  completedAt: string | null;
+}
+
+export interface BrowserTakeover {
+  challenge: BrowserChallenge;
+  takeoverUrl: string;
+  expiresAt: string;
 }
 
 export interface Settings {

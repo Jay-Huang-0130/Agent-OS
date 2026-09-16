@@ -597,6 +597,86 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS watcher_notifications_owner_idx ON watcher_notifications(owner_user_id, created_at DESC);
     `,
   },
+  {
+    version: 8,
+    name: "phase_8_browser_authentication_gate",
+    sql: `
+      CREATE TABLE IF NOT EXISTS browser_sessions (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        adapter_session_ref TEXT NOT NULL,
+        profile_ref TEXT NOT NULL,
+        origin TEXT,
+        control_mode TEXT NOT NULL CHECK (control_mode IN ('AGENT', 'USER', 'PAUSED', 'CLOSED')),
+        status TEXT NOT NULL CHECK (status IN ('ACTIVE', 'WAITING_AUTH', 'CLOSED', 'FAILED')),
+        lease_token TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(task_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS browser_checkpoints (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES browser_sessions(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version > 0),
+        url TEXT,
+        checkpoint_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        UNIQUE(session_id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS browser_auth_challenges (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        session_id TEXT NOT NULL REFERENCES browser_sessions(id) ON DELETE CASCADE,
+        checkpoint_id TEXT NOT NULL REFERENCES browser_checkpoints(id) ON DELETE RESTRICT,
+        type TEXT NOT NULL CHECK (type IN ('LOGIN', 'MFA', 'CAPTCHA', 'UNKNOWN')),
+        origin TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'TAKEN_OVER', 'COMPLETED', 'EXPIRED', 'CANCELLED')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS browser_takeover_tokens (
+        token_hash TEXT PRIMARY KEY,
+        challenge_id TEXT NOT NULL REFERENCES browser_auth_challenges(id) ON DELETE CASCADE,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        origin TEXT NOT NULL,
+        profile_ref TEXT NOT NULL,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL,
+        consumed_at TEXT,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS browser_notifications (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        challenge_id TEXT NOT NULL REFERENCES browser_auth_challenges(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        read_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS browser_sessions_owner_status_idx
+      ON browser_sessions(owner_user_id, status, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS browser_challenges_owner_status_idx
+      ON browser_auth_challenges(owner_user_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS browser_takeovers_challenge_idx
+      ON browser_takeover_tokens(challenge_id, expires_at);
+      CREATE INDEX IF NOT EXISTS browser_notifications_owner_idx
+      ON browser_notifications(owner_user_id, created_at DESC);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {

@@ -1034,6 +1034,13 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .secretary-goal-card footer span { display: inline-flex; align-items: center; gap: 5px; }
 .goal-status { display: inline-flex; padding: 4px 7px; border-radius: 20px; color: var(--green); background: var(--green-soft); font-size: 9px; font-weight: 850; letter-spacing: .04em; }
 .goal-status.waiting, .goal-status.waiting_auth, .goal-status.needs_approval { color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, var(--panel)); }
+
+.browser-auth-gate { border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--border)); background: color-mix(in srgb, var(--amber) 7%, var(--panel)); }
+.browser-auth-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; }
+.browser-auth-card > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, var(--panel)); }
+.browser-auth-card p, .browser-auth-card small { display: block; margin: 5px 0 0; color: var(--muted); }
+.browser-auth-card > div:last-child { display: flex; flex-direction: column; gap: 8px; min-width: 160px; }
+@media (max-width: 720px) { .browser-auth-card { grid-template-columns: auto 1fr; } .browser-auth-card > div:last-child { grid-column: 1 / -1; } }
 .goal-status.blocked, .goal-status.cancelled { color: var(--danger); background: color-mix(in srgb, var(--danger) 11%, var(--panel)); }
 .goal-status.completed { color: var(--green); }
 .secretary-empty { min-height: 86px; display: flex; align-items: center; justify-content: center; gap: 9px; padding: 20px; color: var(--muted); font-size: 12px; }

@@ -137,9 +137,9 @@ Agent Web 是目前 Agent-OS foundation 的必要元件。以下狀況會讓安�
 - 未來 CDP 只允許 loopback 或 Unix socket，不得監聽 `0.0.0.0`。
 - 遠端裝置透過認證 node／Relay 加入，不直接公開原始 CDP。
 
-## 未來 Agent Adapter
+## Agent Adapter（Phase 8）
 
-下一階段應新增獨立 Browser Adapter：
+Phase 8 已新增獨立 Browser Adapter：
 
 ```text
 Agent Runtime
@@ -167,11 +167,11 @@ session.acquire/release/pause
 
 Agent-OS 使用操作租約避免人類與 Agent 同時改變畫面。付款、發信、刪除、發布、帳號設定等外部效果操作必須支援人工批准與審計。
 
-完成 Adapter 後，`agent-webctl info` 才能改為：
+相容的 Agent-Web 安裝必須讓 `agent-webctl info` 回報：
 
 ```text
 AGENT_CONTROL_AVAILABLE=true
 AGENT_CONTROL_PROTOCOL=agent-web-adapter-v1
 ```
 
-在那之前，Agent-OS 只能確認瀏覽器基礎設施存在並讓人類操作，不應宣稱已具備自動點擊能力。
+Gateway 只有在上述 capability 與 protocol 都成立時才註冊 `web.*` 工具；舊版 Agent-Web 仍只提供人類操作，Browser Task 會安全保持 `BLOCKED`。

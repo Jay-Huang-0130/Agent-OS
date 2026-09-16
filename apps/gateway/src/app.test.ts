@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "./app.js";
+import type { BrowserAdapter, BrowserAdapterHealth, BrowserAdapterSession } from "./agentWeb.js";
 import type { OpenAIAuthService, OpenAIConnection } from "./codexAuth.js";
 import { loadConfig } from "./config.js";
 import type { ModelRunRequest, ModelRunResult, ModelRuntime } from "./modelRuntime.js";
@@ -19,7 +20,7 @@ afterEach(async () => {
 });
 
 async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor, modelRuntime?: ModelRuntime,
-  watcherFetcher?: WatcherFetcher) {
+  watcherFetcher?: WatcherFetcher, browserAdapter?: BrowserAdapter) {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-gateway-"));
   const config = loadConfig({
     stateDir,
@@ -32,10 +33,26 @@ async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: Capa
     ...(capabilityExecutor ? { capabilityExecutor } : {}),
     ...(modelRuntime ? { modelRuntime } : {}),
     ...(watcherFetcher ? { watcherFetcher } : {}),
+    ...(browserAdapter ? { browserAdapter } : {}),
     startWakeEngine: false,
   });
   apps.push(app);
   return { app, config };
+}
+
+class ReadyBrowserAdapter implements BrowserAdapter {
+  async health(): Promise<BrowserAdapterHealth> { return { ready: true, protocol: "agent-web-adapter-v1",
+    humanUrl: "https://browser.local", capabilities: ["web.open", "web.snapshot", "web.click", "web.find", "web.download"] }; }
+  async acquire(): Promise<BrowserAdapterSession> { return { sessionRef: "session", profileRef: "profile" }; }
+  async release(): Promise<void> {}
+  async pause(): Promise<void> {}
+  async resume(): Promise<void> {}
+  async navigate(): Promise<Record<string, unknown>> { return {}; }
+  async snapshot(): Promise<Record<string, unknown>> { return {}; }
+  async act(): Promise<Record<string, unknown>> { return {}; }
+  async download(): Promise<Record<string, unknown>> { return {}; }
+  async probeAuthentication(): Promise<boolean> { return true; }
+  async takeoverUrl(): Promise<string> { return "https://browser.local/vnc.html"; }
 }
 
 class DirectResponseRuntime implements ModelRuntime {
@@ -104,6 +121,21 @@ test("first-time setup creates an authenticated owner session", async () => {
 
   const metaAfter = await app.inject({ method: "GET", url: "/api/v1/meta" });
   assert.equal(metaAfter.json().setupRequired, false);
+});
+
+test("Phase 8 browser status exposes only authenticated adapter capabilities", async () => {
+  const { app, config } = await fixture(undefined, undefined, undefined, undefined, new ReadyBrowserAdapter());
+  const denied = await app.inject({ method: "GET", url: "/api/v1/browser/status" });
+  assert.equal(denied.statusCode, 401);
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({ method: "POST", url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" } });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const status = await app.inject({ method: "GET", url: "/api/v1/browser/status", headers: { cookie } });
+  assert.equal(status.statusCode, 200);
+  assert.equal(status.json().ready, true);
+  assert.deepEqual(status.json().capabilities, ["web.open", "web.snapshot", "web.click", "web.find", "web.download"]);
 });
 
 test("protected routes require authentication and CSRF", async () => {

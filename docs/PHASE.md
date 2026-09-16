@@ -51,7 +51,7 @@ Repo 已有、不要重做：
 - Browser Authentication Gate。
 - Project Memory、Experience、Skill 與受控自主進步。
 
-下一個實作階段是 Phase 8，不回頭重寫已完成的 Phase 0–7。
+下一個實作階段是 Phase 9，不回頭重寫已完成的 Phase 0–8。
 
 ---
 
@@ -380,6 +380,8 @@ Strategic Review 低頻且只在異常或進度停滯時執行
 
 ## Phase 8：Agent-Web Browser Authentication Gate
 
+狀態：`COMPLETED`（實作與驗收見 [Phase 8](PHASE-8.md)）
+
 目標：讓 Agent-Web 成為可替換 Browser Runtime，不改變 Goal ownership。
 
 ### Browser Adapter
@@ -630,6 +632,6 @@ Decision Queue、Daily Brief、Weekly Review
 
 ## 4. 現在應該做什麼
 
-Phase 0–7 已完成。下一步只做 Phase 8：Agent-Web Browser Authentication Gate，不同時開始 Memory、Self-Improvement 或 Device Mesh。
+Phase 0–8 已完成。下一步只做 Phase 9：Attention、Agenda 與 Briefing，不同時開始 Memory、Self-Improvement 或 Device Mesh。
 
 目前執行清單與已完成項目的刪除線標記，統一維護在 [開發計劃表](DEVELOPMENT-PLAN.md)。
