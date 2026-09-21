@@ -734,6 +734,93 @@ const migrations: Migration[] = [
       ON telegram_deliveries(status, available_at, created_at);
     `,
   },
+  {
+    version: 10,
+    name: "phase_9_attention_agenda_briefing",
+    sql: `
+      CREATE TABLE IF NOT EXISTS calendar_events (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        starts_at TEXT NOT NULL,
+        ends_at TEXT NOT NULL,
+        all_day INTEGER NOT NULL DEFAULT 0 CHECK (all_day IN (0, 1)),
+        location TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'AGENT_OS',
+        status TEXT NOT NULL DEFAULT 'CONFIRMED' CHECK (status IN ('CONFIRMED', 'TENTATIVE', 'CANCELLED')),
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(owner_user_id, idempotency_key),
+        CHECK (ends_at > starts_at)
+      );
+
+      CREATE TABLE IF NOT EXISTS availability_windows (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+        start_minute INTEGER NOT NULL CHECK (start_minute BETWEEN 0 AND 1439),
+        end_minute INTEGER NOT NULL CHECK (end_minute BETWEEN 1 AND 1440),
+        timezone TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (end_minute > start_minute),
+        UNIQUE(owner_user_id, weekday, start_minute, end_minute)
+      );
+
+      CREATE TABLE IF NOT EXISTS attention_settings (
+        owner_user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        timezone TEXT NOT NULL,
+        quiet_start_minute INTEGER NOT NULL DEFAULT 1320 CHECK (quiet_start_minute BETWEEN 0 AND 1439),
+        quiet_end_minute INTEGER NOT NULL DEFAULT 480 CHECK (quiet_end_minute BETWEEN 0 AND 1439),
+        daily_brief_minute INTEGER NOT NULL DEFAULT 540 CHECK (daily_brief_minute BETWEEN 0 AND 1439),
+        weekly_review_weekday INTEGER NOT NULL DEFAULT 1 CHECK (weekly_review_weekday BETWEEN 0 AND 6),
+        weekly_review_minute INTEGER NOT NULL DEFAULT 540 CHECK (weekly_review_minute BETWEEN 0 AND 1439),
+        digest_mode TEXT NOT NULL DEFAULT 'DIGEST' CHECK (digest_mode IN ('IMMEDIATE', 'DIGEST')),
+        stalled_after_hours INTEGER NOT NULL DEFAULT 72 CHECK (stalled_after_hours BETWEEN 1 AND 8760),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS briefings (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('DAILY', 'WEEKLY')),
+        period_key TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        meaningful INTEGER NOT NULL CHECK (meaningful IN (0, 1)),
+        created_at TEXT NOT NULL,
+        delivered_at TEXT,
+        UNIQUE(owner_user_id, kind, period_key)
+      );
+
+      CREATE TABLE IF NOT EXISTS attention_notifications (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('URGENT', 'CONFLICT', 'STALLED', 'DIGEST', 'DAILY_BRIEF', 'WEEKLY_REVIEW')),
+        severity TEXT NOT NULL CHECK (severity IN ('LOW', 'NORMAL', 'URGENT')),
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        dedupe_key TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('PENDING', 'HELD', 'SENT', 'SUPPRESSED')),
+        available_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        sent_at TEXT,
+        read_at TEXT,
+        UNIQUE(owner_user_id, dedupe_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS calendar_events_owner_time_idx
+      ON calendar_events(owner_user_id, starts_at, ends_at);
+      CREATE INDEX IF NOT EXISTS availability_owner_weekday_idx
+      ON availability_windows(owner_user_id, weekday, start_minute);
+      CREATE INDEX IF NOT EXISTS briefings_owner_kind_idx
+      ON briefings(owner_user_id, kind, created_at DESC);
+      CREATE INDEX IF NOT EXISTS attention_notifications_due_idx
+      ON attention_notifications(owner_user_id, status, available_at, created_at);
+    `,
+  },
 ];
 
 function asString(value: unknown): string {

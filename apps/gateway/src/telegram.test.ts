@@ -41,10 +41,10 @@ function fixture() {
   return { database, owner, accepted, api, service, advance(ms: number) { now = new Date(now.getTime() + ms); } };
 }
 
-test("migration 9 creates durable Telegram channel tables", () => {
+test("Telegram migration remains present after later schema upgrades", () => {
   const database = new AgentDatabase(":memory:");
   try {
-    assert.equal(database.migrationVersions().at(-1), 9);
+    assert.equal(database.migrationVersions().at(-1), 10);
     const tables = database.db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'telegram_%'`)
       .all() as Array<{ name: string }>;
     assert.deepEqual(tables.map((item) => item.name).sort(), [

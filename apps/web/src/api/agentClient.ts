@@ -1,14 +1,18 @@
 import type {
   ActivityItem,
+  AgendaSnapshot,
   AssistantIntakeReceipt,
   AssistantRequestRecord,
   ApprovalRecord,
+  AttentionSettings,
   AgentEvent,
   ModelOption,
   BootstrapResponse,
   BrowserChallenge,
   BrowserStatus,
   BrowserTakeover,
+  Briefing,
+  CalendarEvent,
   CapabilityRecord,
   ConnectionState,
   CommitmentOwner,
@@ -188,6 +192,45 @@ export class AgentClient {
 
   portfolio(): Promise<PortfolioSnapshot> {
     return this.request<PortfolioSnapshot>("/api/v1/portfolio");
+  }
+
+  agenda(): Promise<AgendaSnapshot> {
+    return this.request<AgendaSnapshot>("/api/v1/agenda");
+  }
+
+  calendarEvents(): Promise<CalendarEvent[]> {
+    return this.request<CalendarEvent[]>("/api/v1/calendar/events");
+  }
+
+  createCalendarEvent(input: { title: string; description?: string; startsAt: string; endsAt: string;
+    allDay?: boolean; location?: string }): Promise<CalendarEvent> {
+    return this.request<CalendarEvent>("/api/v1/calendar/events", {
+      method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify(input),
+    }, true);
+  }
+
+  cancelCalendarEvent(id: string): Promise<CalendarEvent> {
+    return this.request<CalendarEvent>(`/api/v1/calendar/events/${encodeURIComponent(id)}/cancel`, {
+      method: "POST", body: JSON.stringify({}),
+    }, true);
+  }
+
+  attentionSettings(): Promise<AttentionSettings> {
+    return this.request<AttentionSettings>("/api/v1/attention/settings");
+  }
+
+  updateAttentionSettings(settings: AttentionSettings): Promise<AttentionSettings> {
+    return this.request<AttentionSettings>("/api/v1/attention/settings", {
+      method: "PUT", body: JSON.stringify(settings),
+    }, true);
+  }
+
+  briefings(kind?: "DAILY" | "WEEKLY"): Promise<Briefing[]> {
+    return this.request<Briefing[]>(`/api/v1/briefings${kind ? `?kind=${kind}` : ""}`);
+  }
+
+  generateBriefing(kind: "daily" | "weekly"): Promise<Briefing> {
+    return this.request<Briefing>(`/api/v1/briefings/${kind}`, { method: "POST", body: JSON.stringify({}) }, true);
   }
 
   projects(): Promise<ProjectRecord[]> {

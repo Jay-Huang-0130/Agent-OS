@@ -5,9 +5,9 @@
 
 Agent-OS 的目標不是再做一個聊天機器人，而是建立一個能接受委託、持續工作、使用不同裝置能力，並對結果負責的私人 AI 作業層。
 
-專案目前已完成 Phase 0–8：可攜式基礎架構、Durable Responsibility Store、Secretary Portfolio、通用 Wake Engine、Codex Model Runtime／Goal Compiler／Bounded Agent、跨重啟的 Watcher／Hybrid long-term Goal，以及 Agent-Web Browser Authentication Gate。
+專案目前已完成 Phase 0–9：可攜式基礎架構、Durable Responsibility Store、Secretary Portfolio、通用 Wake Engine、Codex Model Runtime／Goal Compiler／Bounded Agent、跨重啟的 Watcher／Hybrid long-term Goal、Agent-Web Browser Authentication Gate，以及 Attention／Agenda／Daily Brief／Weekly Review。
 
-## Phase 0–8 已完成
+## Phase 0–9 已完成
 
 - Agent-OS 自帶固定版本的 Node.js 24 LTS，不安裝系統 Node、不執行全域 `npm install`。
 - 正式支援 64-bit Raspberry Pi OS／Debian／Ubuntu 的 ARM64 與 x64。
@@ -214,11 +214,11 @@ bash ./install.sh --force-agent-web-update
 
 ## 專案狀態
 
-目前版本已具備 durable responsibility kernel、Secretary Portfolio、背景 Wake Worker、通用 deterministic Capability runner、真正連到 Kernel 的 Codex Model Runtime，以及 Agent-Web Browser Adapter。Browser Task 遇到登入、MFA 或 CAPTCHA 時會持久保存 checkpoint、進入 `WAITING_AUTH`、讓使用者短效接管，並在 deterministic auth probe 成功後以 `AUTH_COMPLETED` Wake 恢復。沒有相容 Browser Adapter 時會保持 `BLOCKED`，不會假裝已使用工具。OpenAI 登入仍使用獨立的 ChatGPT device-code 流程。
+目前版本已具備 durable responsibility kernel、Secretary Portfolio、背景 Wake Worker、通用 deterministic Capability runner、真正連到 Kernel 的 Codex Model Runtime、Agent-Web Browser Adapter，以及 Phase 9 的跨專案 Agenda、衝突／逾期偵測、注意力節流、Daily Brief 與 Weekly Review。Browser Task 遇到登入、MFA 或 CAPTCHA 時會持久保存 checkpoint、進入 `WAITING_AUTH`、讓使用者短效接管，並在 deterministic auth probe 成功後以 `AUTH_COMPLETED` Wake 恢復。沒有相容 Browser Adapter 時會保持 `BLOCKED`，不會假裝已使用工具。OpenAI 登入仍使用獨立的 ChatGPT device-code 流程。
 
 後續建議依序實作：
 
-1. Attention、Agenda 與 Briefing（Phase 9）。
+1. File Broker 與完整 Generated Capability Lifecycle（Phase 10）。
 2. File Broker、Generated Capability lifecycle 與 Memory。
 3. Controlled Self-Improvement。
 4. Device identity 與 Personal Device Mesh。

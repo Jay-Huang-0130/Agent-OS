@@ -24,6 +24,7 @@ import { AgentDatabase, type ActivityRecord } from "./database.js";
 import { ModelRuntimeError, TrackedModelRuntime, type ModelRuntime } from "./modelRuntime.js";
 import { ImmediatePlanRunner, ModelAiWakeExecutor, Phase6AssistantExecutor, Phase6RequestRouter } from "./phase6Runtime.js";
 import { WatcherError, WatcherService, type WatcherFetcher } from "./phase7Runtime.js";
+import { Phase9SecretaryService } from "./phase9Secretary.js";
 import { collectSystemStatus } from "./metrics.js";
 import {
   HttpTelegramBotApi,
@@ -176,6 +177,31 @@ const approvalDecisionSchema = z.object({
   decision: z.enum(["APPROVED", "REJECTED"]),
   reason: z.string().trim().min(1).max(2_000),
 }).strict();
+const calendarEventSchema = z.object({
+  title: z.string().trim().min(1).max(240),
+  description: z.string().trim().max(8_000).optional(),
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }),
+  allDay: z.boolean().optional(),
+  location: z.string().trim().max(500).optional(),
+  source: z.string().trim().min(1).max(100).optional(),
+  status: z.enum(["CONFIRMED", "TENTATIVE"]).optional(),
+}).strict();
+const calendarQuerySchema = z.object({
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+}).strict();
+const availabilitySchema = z.object({ windows: z.array(z.object({
+  weekday: z.number().int().min(0).max(6), startMinute: z.number().int().min(0).max(1439),
+  endMinute: z.number().int().min(1).max(1440), timezone: z.string().trim().min(1).max(100),
+  enabled: z.boolean(),
+}).strict().refine((value) => value.endMinute > value.startMinute, "End must be after start.")).max(100) }).strict();
+const attentionSettingsSchema = z.object({
+  timezone: z.string().trim().min(1).max(100), quietStartMinute: z.number().int().min(0).max(1439),
+  quietEndMinute: z.number().int().min(0).max(1439), dailyBriefMinute: z.number().int().min(0).max(1439),
+  weeklyReviewWeekday: z.number().int().min(0).max(6), weeklyReviewMinute: z.number().int().min(0).max(1439),
+  digestMode: z.enum(["IMMEDIATE", "DIGEST"]), stalledAfterHours: z.number().int().min(1).max(8760),
+}).strict();
 
 type Settings = z.infer<typeof settingsSchema>;
 type EventSocket = {
@@ -204,6 +230,7 @@ export interface BuildAppOptions {
   startWatcherEngine?: boolean;
   telegramApi?: TelegramBotApi;
   startTelegram?: boolean;
+  startSecretaryEngine?: boolean;
 }
 
 function apiError(reply: FastifyReply, status: number, code: string, message: string) {
@@ -350,6 +377,8 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     const owner = database.getOwner();
     if (owner) telegramChannel?.notify(owner.id, candidate as TelegramNotification);
   };
+  const secretaryService = new Phase9SecretaryService(database, kernel, (item) => publishNotification(item));
+  if (options.startSecretaryEngine ?? (options.startWakeEngine !== false)) secretaryService.start();
   const browserService = new BrowserPhase8Service(database, kernel,
     options.browserAdapter ?? new AgentWebCliAdapter(config.agentWebController),
     (item) => publishNotification(item));
@@ -546,9 +575,14 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       UNION ALL
       SELECT id, title, body, created_at, read_at, goal_id, NULL AS watcher_id,
         task_id, challenge_id, 'attention' AS kind FROM browser_notifications WHERE owner_user_id = ?
-      ORDER BY created_at DESC LIMIT 200`).all(session.userId, session.userId) as Array<Record<string, unknown>>;
+      UNION ALL
+      SELECT id, title, body, created_at, read_at, NULL AS goal_id, NULL AS watcher_id,
+        NULL AS task_id, NULL AS challenge_id, lower(kind) AS kind FROM attention_notifications
+        WHERE owner_user_id = ? AND status = 'SENT'
+      ORDER BY created_at DESC LIMIT 200`).all(session.userId, session.userId, session.userId) as Array<Record<string, unknown>>;
     return rows.map((row) => ({ id: String(row.id), title: String(row.title), detail: String(row.body), kind: String(row.kind),
-      createdAt: String(row.created_at), read: row.read_at !== null, goalId: String(row.goal_id),
+      createdAt: String(row.created_at), read: row.read_at !== null,
+      ...(row.goal_id ? { goalId: String(row.goal_id) } : {}),
       ...(row.watcher_id ? { watcherId: String(row.watcher_id) } : {}),
       ...(row.task_id ? { taskId: String(row.task_id) } : {}),
       ...(row.challenge_id ? { challengeId: String(row.challenge_id) } : {}) }));
@@ -561,6 +595,8 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
       WHERE id = ? AND owner_user_id = ?`).run(new Date().toISOString(), request.params.id, session.userId);
     database.db.prepare(`UPDATE browser_notifications SET read_at = COALESCE(read_at, ?)
       WHERE id = ? AND owner_user_id = ?`).run(new Date().toISOString(), request.params.id, session.userId);
+    database.db.prepare(`UPDATE attention_notifications SET read_at = COALESCE(read_at, ?)
+      WHERE id = ? AND owner_user_id = ?`).run(new Date().toISOString(), request.params.id, session.userId);
     return reply.code(204).send();
   });
 
@@ -570,6 +606,8 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     database.db.prepare(`UPDATE watcher_notifications SET read_at = COALESCE(read_at, ?)
       WHERE owner_user_id = ?`).run(new Date().toISOString(), session.userId);
     database.db.prepare(`UPDATE browser_notifications SET read_at = COALESCE(read_at, ?)
+      WHERE owner_user_id = ?`).run(new Date().toISOString(), session.userId);
+    database.db.prepare(`UPDATE attention_notifications SET read_at = COALESCE(read_at, ?)
       WHERE owner_user_id = ?`).run(new Date().toISOString(), session.userId);
     return reply.code(204).send();
   });
@@ -1118,6 +1156,103 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     return kernel.portfolio(session.userId, timezone);
   });
 
+  app.get("/api/v1/agenda", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return secretaryService.agenda(session.userId);
+  });
+
+  app.get("/api/v1/calendar/events", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const parsed = calendarQuerySchema.safeParse(request.query);
+    if (!parsed.success) return apiError(reply, 400, "invalid_calendar_filter", "Calendar filters are invalid.");
+    return secretaryService.listEvents(session.userId, parsed.data.from, parsed.data.to);
+  });
+
+  app.post("/api/v1/calendar/events", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const key = idempotencyKey(request, reply);
+    if (key === "") return;
+    const parsed = calendarEventSchema.safeParse(request.body);
+    if (!parsed.success || new Date(parsed.data.endsAt).getTime() <= new Date(parsed.data.startsAt).getTime()) {
+      return apiError(reply, 400, "invalid_calendar_event", "Calendar event times or fields are invalid.");
+    }
+    const event = secretaryService.createEvent(session.userId, {
+      title: parsed.data.title, description: parsed.data.description ?? "", startsAt: parsed.data.startsAt,
+      endsAt: parsed.data.endsAt, allDay: parsed.data.allDay ?? false, location: parsed.data.location ?? "",
+      source: parsed.data.source ?? "AGENT_OS", ...(parsed.data.status ? { status: parsed.data.status } : {}),
+    }, key);
+    broadcast({ type: "calendar.event.created", data: event });
+    return reply.code(201).send(event);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/calendar/events/:id/cancel", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const event = secretaryService.cancelEvent(session.userId, request.params.id);
+    if (!event) return apiError(reply, 404, "calendar_event_not_found", "Calendar event was not found.");
+    broadcast({ type: "calendar.event.cancelled", data: event });
+    return event;
+  });
+
+  app.get("/api/v1/calendar/availability", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return secretaryService.availability(session.userId);
+  });
+
+  app.put("/api/v1/calendar/availability", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = availabilitySchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_availability", "Availability windows are invalid.");
+    return secretaryService.replaceAvailability(session.userId, parsed.data.windows);
+  });
+
+  app.get("/api/v1/attention/settings", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    return secretaryService.settings(session.userId);
+  });
+
+  app.put("/api/v1/attention/settings", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = attentionSettingsSchema.safeParse(request.body);
+    if (!parsed.success) return apiError(reply, 400, "invalid_attention_settings", "Attention settings are invalid.");
+    return secretaryService.updateSettings(session.userId, parsed.data);
+  });
+
+  app.post("/api/v1/attention/scan", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    await secretaryService.scan(session.userId);
+    return { scannedAt: new Date().toISOString() };
+  });
+
+  app.get("/api/v1/briefings", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session) return;
+    const query = request.query as { kind?: string };
+    const kind = query.kind?.toUpperCase();
+    if (kind && kind !== "DAILY" && kind !== "WEEKLY") return apiError(reply, 400, "invalid_briefing_kind", "Briefing kind is invalid.");
+    return secretaryService.listBriefings(session.userId, kind as "DAILY" | "WEEKLY" | undefined);
+  });
+
+  app.post("/api/v1/briefings/daily", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    return secretaryService.dailyBrief(session.userId, new Date(), true);
+  });
+
+  app.post("/api/v1/briefings/weekly", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    return secretaryService.weeklyReview(session.userId, new Date(), true);
+  });
+
   app.post("/api/v1/approvals", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
@@ -1299,6 +1434,7 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     await watcherService.stop();
     await planRunner?.stop();
     await wakeEngine.stop();
+    secretaryService.stop();
     await telegramChannel?.stop();
     for (const socket of sockets) socket.close(1001, "server shutdown");
     sockets.clear();

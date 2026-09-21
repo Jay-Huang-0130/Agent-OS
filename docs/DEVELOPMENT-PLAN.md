@@ -71,12 +71,13 @@
   - [x] ~~Timeline 將內部 transition 轉成可讀的執行紀錄。~~
   - 詳細驗收：[Phase 8](PHASE-8.md)
 
-- [ ] **Phase 9：Attention、Agenda 與 Briefing**
-  - [ ] Calendar event 與 availability 資料模型。
-  - [ ] Agenda Builder、Deadline conflict detector、Urgent Alert。
-  - [ ] Decision Queue、Daily Brief、Weekly Review。
-  - [ ] Quiet hours、digest、通知去重與停滯偵測。
-  - [ ] 沒有重要變化時不產生空 Brief。
+- [x] ~~**Phase 9：Attention、Agenda 與 Briefing**~~
+  - [x] ~~Calendar event 與 availability 資料模型。~~
+  - [x] ~~Agenda Builder、Deadline conflict detector、Urgent Alert。~~
+  - [x] ~~Decision Queue、Daily Brief、Weekly Review。~~
+  - [x] ~~Quiet hours、digest、通知去重與停滯偵測。~~
+  - [x] ~~沒有重要變化時不產生空 Brief。~~
+  - 詳細驗收：[Phase 9](PHASE-9.md)
 
 - [ ] **Phase 10：File Broker 與完整 Generated Capability Lifecycle**
   - [ ] Workspace grant、read-only／read-write 與路徑安全。
@@ -110,14 +111,14 @@
 
 - [x] ~~**Kernel MVP（Phase 5）**：責任、Portfolio、Commitment、排程與跨重啟恢復。~~
 - [x] ~~**Agent MVP（Phase 8）**：自然語言 Goal、長期 Watcher、真實 Browser Tool、登入接管與恢復。~~
-- [ ] **Secretary MVP（Phase 9）**：跨 Project 排序、注意力管理、Daily Brief 與 Weekly Review。
+- [x] ~~**Secretary MVP（Phase 9）**：跨 Project 排序、注意力管理、Daily Brief 與 Weekly Review。~~
 - [ ] **Safe Capability Platform（Phase 10）**：安全檔案操作與完整 Capability lifecycle。
 - [ ] **Learning Agent-OS（Phase 12）**：可量測、可回滾、需人工批准的改善流程。
 - [ ] **Personal Device Mesh（Phase 13）**：安全使用個人裝置能力。
 
 ## 現在的下一步
 
-Phase 8 已完成；下一步只開始 **Phase 9**。Phase 8 的完成標準是：
+Phase 9 已完成；下一步只開始 **Phase 10**。Phase 9 的完成證據見 [Phase 9 實作說明](PHASE-9.md)。
 
 1. Agent 能以真實 Browser Adapter 執行公開網頁任務。
 2. 遇到登入、MFA 或 CAPTCHA 時安全停止，不把秘密交給模型。

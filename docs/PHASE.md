@@ -51,7 +51,7 @@ Repo 已有、不要重做：
 - Browser Authentication Gate。
 - Project Memory、Experience、Skill 與受控自主進步。
 
-下一個實作階段是 Phase 9，不回頭重寫已完成的 Phase 0–8。
+Phase 9 已完成；下一個實作階段是 Phase 10，不回頭重寫已完成的 Phase 0–9。
 
 ---
 
@@ -426,6 +426,8 @@ Agent 遇到登入頁會停止並通知使用者
 
 ## Phase 9：Attention、Agenda 與 Briefing
 
+狀態：`COMPLETED`（詳見 [Phase 9 實作說明](PHASE-9.md)）
+
 目標：讓系統從任務引擎變成可日常使用的秘書。
 
 ### 製作
@@ -632,6 +634,6 @@ Decision Queue、Daily Brief、Weekly Review
 
 ## 4. 現在應該做什麼
 
-Phase 0–8 已完成。下一步只做 Phase 9：Attention、Agenda 與 Briefing，不同時開始 Memory、Self-Improvement 或 Device Mesh。
+Phase 0–9 已完成。下一步只做 Phase 10：File Broker 與完整 Generated Capability Lifecycle，不同時開始 Memory、Self-Improvement 或 Device Mesh。
 
 目前執行清單與已完成項目的刪除線標記，統一維護在 [開發計劃表](DEVELOPMENT-PLAN.md)。

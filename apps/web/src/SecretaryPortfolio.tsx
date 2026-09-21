@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AgentClient, ApiError } from "./api/agentClient";
 import type {
+  AgendaSnapshot,
   AutomationRecord,
   AutonomyLevel,
   BrowserChallenge,
   BrowserStatus,
+  Briefing,
   CapabilityRecord,
   CommitmentOwner,
   GoalDetail,
@@ -326,6 +328,51 @@ function GoalDrawer({ goalId, automations, client, onClose, onChanged }: {
     <section><div className="secretary-drawer-title"><h3>Timeline</h3><span>{detail.timeline.length}</span></div><div className="secretary-timeline">{detail.timeline.map((event) => <div key={event.id}><i /><span><strong>{eventLabel(event.type)}</strong><small>{formatDate(event.occurredAt)}・{event.actor}</small></span></div>)}</div></section>
     <footer className="goal-detail-actions">{detail.goal.status === "ACTIVE" && <button className="secondary" disabled={busy} onClick={() => void act("pause")}>暫停 Goal</button>}{["WAITING", "BLOCKED"].includes(detail.goal.status) && <button className="primary" disabled={busy} onClick={() => void act("resume")}>恢復 Goal</button>}{!["COMPLETED", "CANCELLED"].includes(detail.goal.status) && <button className="danger-link" disabled={busy} onClick={() => void act("cancel")}>取消 Goal</button>}</footer>
   </>}</aside></div>;
+}
+
+export function AttentionAgenda({ client }: { client: AgentClient }) {
+  const [agenda, setAgenda] = useState<AgendaSnapshot>();
+  const [brief, setBrief] = useState<Briefing>();
+  const [weekly, setWeekly] = useState<Briefing>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = async () => {
+    try {
+      const [nextAgenda, dailyBriefs, weeklyBriefs] = await Promise.all([
+        client.agenda(), client.briefings("DAILY"), client.briefings("WEEKLY"),
+      ]);
+      setAgenda(nextAgenda); setBrief(dailyBriefs.find((item) => item.meaningful));
+      setWeekly(weeklyBriefs.find((item) => item.meaningful)); setError("");
+    } catch (cause) { setError(errorMessage(cause)); }
+  };
+  useEffect(() => { void load(); }, []);
+  const generate = async (kind: "daily" | "weekly") => {
+    setBusy(true);
+    try {
+      const result = await client.generateBriefing(kind);
+      if (kind === "daily") setBrief(result.meaningful ? result : undefined);
+      else setWeekly(result.meaningful ? result : undefined);
+      await load();
+    } catch (cause) { setError(errorMessage(cause)); }
+    finally { setBusy(false); }
+  };
+  if (!agenda && !error) return <section className="secretary-section"><div className="secretary-loading"><span className="loader" />Building agenda…</div></section>;
+  return <section className="secretary-section phase9-agenda">
+    <header><span><Icon name="update" size={18} /></span><div><h2>Attention & Agenda</h2><p>{agenda?.date} · {agenda?.timezone}</p></div><b>{agenda?.items.length ?? 0}</b></header>
+    {error && <div className="error-box"><Icon name="warning" />{error}</div>}
+    {agenda && <>
+      {(agenda.urgentAlerts.length > 0 || agenda.conflicts.length > 0) && <div className="phase9-alerts">
+        {agenda.urgentAlerts.map((item) => <article key={item.id}><strong>{item.kind}: {item.title}</strong><p>{item.detail}</p></article>)}
+        {agenda.conflicts.map((item) => <article key={item.id}><strong>{item.title}</strong><p>{item.detail}</p></article>)}
+      </div>}
+      {agenda.items.length ? <div className="secretary-goal-list">{agenda.items.slice(0, 8).map((item) => <article className="secretary-goal-card" key={`${item.type}:${item.id}`}>
+        <div className="secretary-goal-head"><span className={`goal-status ${item.attention.toLowerCase()}`}>{item.attention}</span><small>{item.type}</small></div>
+        <h3>{item.title}</h3><p>{item.startsAt ? formatDate(item.startsAt) : item.dueAt ? `Due ${formatDate(item.dueAt)}` : item.status}</p>
+      </article>)}</div> : <EmptySection text="No agenda items need your attention." />}
+      <div className="phase9-brief"><div><strong>Daily Brief</strong><p>{brief ? `${brief.periodKey} · ready${brief.deliveredAt ? " · delivered" : ""}` : "No empty brief will be sent."}</p></div><button className="secondary" disabled={busy} onClick={() => void generate("daily")}>{busy ? "Building…" : "Build daily"}</button></div>
+      <div className="phase9-brief"><div><strong>Weekly Review</strong><p>{weekly ? `${weekly.periodKey} · ready${weekly.deliveredAt ? " · delivered" : ""}` : "Completed, stalled, blocked and next priorities."}</p></div><button className="secondary" disabled={busy} onClick={() => void generate("weekly")}>{busy ? "Building…" : "Build weekly"}</button></div>
+    </>}
+  </section>;
 }
 
 export function SecretaryOverview({

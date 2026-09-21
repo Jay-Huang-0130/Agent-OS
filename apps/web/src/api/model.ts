@@ -394,6 +394,38 @@ export interface PortfolioSnapshot {
   approvals: ApprovalRecord[];
 }
 
+export interface CalendarEvent {
+  id: string; title: string; description: string; startsAt: string; endsAt: string;
+  allDay: boolean; location: string; source: string; status: "CONFIRMED" | "TENTATIVE" | "CANCELLED";
+  createdAt: string; updatedAt: string;
+}
+
+export interface AgendaSnapshot {
+  generatedAt: string; date: string; timezone: string;
+  items: Array<{ id: string; type: "CALENDAR" | "GOAL" | "DECISION"; title: string; projectId: string | null;
+    startsAt: string | null; endsAt: string | null; dueAt: string | null; status: string;
+    attention: "URGENT" | "TODAY" | "WAITING" | "NORMAL" }>;
+  conflicts: Array<{ id: string; kind: "CALENDAR_OVERLAP" | "DEADLINE_COLLISION" | "OUTSIDE_AVAILABILITY";
+    title: string; detail: string; itemIds: string[]; startsAt: string }>;
+  urgentAlerts: Array<{ id: string; kind: "OVERDUE" | "DUE_SOON" | "BROKEN_COMMITMENT";
+    title: string; detail: string; goalId: string; dueAt: string | null }>;
+  waitingOnYou: Array<{ id: string; title: string; status: string }>;
+  waitingOnOthers: Array<{ id: string; title: string; status: string }>;
+  decisionQueue: Array<{ id: string; title: string; status: string }>;
+  stalled: Array<{ id: string; title: string; status: string; updatedAt: string }>;
+}
+
+export interface Briefing {
+  id: string; kind: "DAILY" | "WEEKLY"; periodKey: string; content: Record<string, unknown>;
+  meaningful: boolean; createdAt: string; deliveredAt: string | null;
+}
+
+export interface AttentionSettings {
+  timezone: string; quietStartMinute: number; quietEndMinute: number; dailyBriefMinute: number;
+  weeklyReviewWeekday: number; weeklyReviewMinute: number; digestMode: "IMMEDIATE" | "DIGEST";
+  stalledAfterHours: number;
+}
+
 export interface ApprovalRecord {
   id: string;
   goalId: string;

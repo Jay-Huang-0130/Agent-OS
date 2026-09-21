@@ -138,6 +138,32 @@ test("Phase 8 browser status exposes only authenticated adapter capabilities", a
   assert.deepEqual(status.json().capabilities, ["web.open", "web.snapshot", "web.click", "web.find", "web.download"]);
 });
 
+test("Phase 9 calendar and agenda APIs require the owner and expose conflicts", async () => {
+  const { app, config } = await fixture();
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({ method: "POST", url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" } });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const csrf = session.json().csrfToken as string;
+  const headers = { cookie, "x-csrf-token": csrf };
+  const first = await app.inject({ method: "POST", url: "/api/v1/calendar/events", headers,
+    payload: { title: "First", startsAt: "2026-09-21T10:00:00.000Z", endsAt: "2026-09-21T12:00:00.000Z" } });
+  const second = await app.inject({ method: "POST", url: "/api/v1/calendar/events", headers,
+    payload: { title: "Second", startsAt: "2026-09-21T11:00:00.000Z", endsAt: "2026-09-21T13:00:00.000Z" } });
+  assert.equal(first.statusCode, 201);
+  assert.equal(second.statusCode, 201);
+  const events = await app.inject({ method: "GET", url: "/api/v1/calendar/events", headers: { cookie } });
+  assert.equal(events.statusCode, 200);
+  assert.equal(events.json().length, 2);
+  const agenda = await app.inject({ method: "GET", url: "/api/v1/agenda", headers: { cookie } });
+  assert.equal(agenda.statusCode, 200);
+  assert.ok(Array.isArray(agenda.json().conflicts));
+  const denied = await app.inject({ method: "POST", url: "/api/v1/briefings/daily", headers: { cookie }, payload: {} });
+  assert.equal(denied.statusCode, 403);
+});
+
 test("protected routes require authentication and CSRF", async () => {
   const { app, config } = await fixture();
   const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();

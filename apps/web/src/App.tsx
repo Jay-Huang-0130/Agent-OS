@@ -24,7 +24,7 @@ import type {
   WatcherRecord,
 } from "./api/model";
 import { Icon, Logo, type IconName } from "./components/Icon";
-import { ResponsibilitiesPage, SecretaryOverview } from "./SecretaryPortfolio";
+import { AttentionAgenda, ResponsibilitiesPage, SecretaryOverview } from "./SecretaryPortfolio";
 
 type View = "overview" | "tasks" | "records" | "system" | "activity" | "settings";
 const client = new AgentClient();
@@ -739,7 +739,7 @@ function Dashboard({ bootstrap, onLogout }: { bootstrap: BootstrapResponse; onLo
       <header className="topbar"><button className="icon-only menu-button" onClick={() => setMobileNav(true)}><Icon name="menu" /></button><div className="topbar-title"><strong>{pageTitles[view]}</strong><small>Agent-OS・{settings.deviceName}</small></div><div className={`connection ${connection}`}><i />{connection === "online" ? "即時連線" : connection === "reconnecting" ? "重新連線" : "連線中"}</div><button className="notification-button" onClick={() => setNotificationOpen(true)} aria-label="開啟通知中心"><Icon name="warning" size={18} />{unreadCount > 0 && <span>{unreadCount}</span>}</button><span className="topbar-avatar avatar">{bootstrap.session.user?.initials ?? "AO"}</span></header>
       <main className={`content ${["overview", "tasks", "records"].includes(view) ? "workspace-content" : ""}`}>
         {error && <div className="error-box page-error"><Icon name="warning" />{error}<button onClick={() => void refresh()}>重試</button></div>}
-        {view === "overview" && <SecretaryOverview name={name} snapshot={portfolio} projects={projects} automations={automations} client={client} onChanged={refreshResponsibilities} onChat={() => setAssistantOpen(true)} />}
+        {view === "overview" && <><AttentionAgenda client={client} /><SecretaryOverview name={name} snapshot={portfolio} projects={projects} automations={automations} client={client} onChanged={refreshResponsibilities} onChat={() => setAssistantOpen(true)} /></>}
         {view === "tasks" && <ResponsibilitiesPage goals={goals} projects={projects} automations={automations} capabilities={capabilities} watchers={watchers} client={client} onChanged={refreshResponsibilities} />}
         {view === "records" && <RecordsPage records={records} loading={recordsLoading} onRefresh={() => void refreshRecords()} />}
         {view === "system" && <div className="page-stack"><header className="page-header inline"><div><p className="eyebrow">System health</p><h1>系統狀態</h1><p>{system.host.platform}</p></div><button className="secondary" onClick={() => void refresh()}><Icon name="refresh" />重新整理</button></header><section className={`overall ${system.overall}`}><Icon name={system.overall === "healthy" ? "check" : "warning"} size={30} /><div><small>Overall status</small><h2>{system.overall === "healthy" ? "所有核心項目正常" : "部分資源需要注意"}</h2><p>最後更新：{new Date(system.generatedAt).toLocaleString("zh-TW")}</p></div></section><div className="metric-grid">{Object.entries(system.resources).map(([id, metric]) => <Metric key={id} id={id} metric={metric} />)}</div><section className="panel"><div className="panel-title"><span><Icon name="activity" /></span><div><h2>服務健康狀態</h2><p>Gateway 與選用元件</p></div></div><Services system={system} /></section></div>}
