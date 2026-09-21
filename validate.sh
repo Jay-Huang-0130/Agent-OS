@@ -53,6 +53,8 @@ grep -q 'agent-webctl info' scripts/install-agent-web.sh
 grep -q 'READY' scripts/install-agent-web.sh
 grep -q -- '--non-interactive' scripts/install-agent-web.sh
 grep -q -- '--password-file' scripts/install-agent-web.sh
+grep -q 'agent_web_strict=0' install.sh
+grep -q 'Continuing the Agent-OS core update' install.sh
 grep -q 'AGENT_OS_AGENT_WEB_PASSWORD_FILE' docs/AGENT-WEB-INTEGRATION.md
 grep -q 'class CodexAuthBridge' apps/gateway/src/codexAuth.ts
 grep -q 'model/list' apps/gateway/src/codexAuth.ts

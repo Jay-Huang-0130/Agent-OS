@@ -125,7 +125,7 @@ rm -f "$HOME/agent-web-password"
 
 密碼至少 4 字元，但 4 字元只適合完全可信任的私人內網。
 
-首次安裝 Agent Web 仍需加上 `--with-agent-web`。之後執行一般 bootstrap 更新時，安裝器會偵測既有 Agent Web 並保留瀏覽器資料、登入狀態與密碼，同時補上 Agent-OS 所需的新相容能力；若要刻意略過，可使用 `--skip-agent-web`。
+首次安裝 Agent Web 仍需加上 `--with-agent-web`。之後執行一般 bootstrap 更新時，安裝器會偵測既有 Agent Web，並嘗試保留瀏覽器資料、登入狀態與密碼及補上相容能力；若選用元件升級或驗證失敗，普通更新只會警告並繼續啟用 Agent-OS 核心，Browser Task 會安全保持 `BLOCKED`。明確使用 `--with-agent-web` 或 `--force-agent-web-update` 時則採嚴格模式，元件失敗會中止安裝；若要完全略過，可使用 `--skip-agent-web`。
 
 ## 管理指令
 

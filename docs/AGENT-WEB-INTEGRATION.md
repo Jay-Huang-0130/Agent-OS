@@ -115,11 +115,11 @@ AGENT_CONTROL_PROTOCOL=none
 - Agent Web 已健康時不重新安裝。
 - Agent Web Profile、Cookie、下載及網頁密碼保持不變。
 - `--force-agent-web-update` 才強制執行 Agent Web bootstrap。
-- 安裝後永遠重新檢查 `READY=true`。
+- 安裝後重新檢查 `READY=true` 與 Phase 8 adapter protocol。
 
 ## 失敗策略
 
-Agent Web 是目前 Agent-OS foundation 的必要元件。以下狀況會讓安裝失敗並停止：
+Agent Web 是選用元件。普通 bootstrap 更新若偵測到既有 Agent Web，會嘗試升級與驗證；失敗時保留警告並繼續啟用 Agent-OS 核心，Browser Task 安全保持 `BLOCKED`。只有明確使用 `--with-agent-web` 或 `--force-agent-web-update` 的嚴格模式，以下狀況才會讓整體安裝失敗並停止：
 
 - bootstrap 下載失敗。
 - Agent Web 安裝器退出非零。

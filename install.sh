@@ -17,6 +17,7 @@ source "$project_root/config/release.env"
 force_agent_web_update=0
 skip_agent_web=1
 agent_web_explicitly_skipped=0
+agent_web_strict=0
 skip_service=0
 session_only=0
 force_tls=0
@@ -44,9 +45,11 @@ while [[ $# -gt 0 ]]; do
         --force-agent-web-update)
             force_agent_web_update=1
             skip_agent_web=0
+            agent_web_strict=1
             ;;
         --with-agent-web)
             skip_agent_web=0
+            agent_web_strict=1
             ;;
         --skip-agent-web)
             skip_agent_web=1
@@ -222,7 +225,17 @@ fi
 if [[ $skip_agent_web -eq 0 ]]; then
     component_args=()
     [[ $force_agent_web_update -eq 0 ]] || component_args+=(--force-update)
-    bash "$staging_dir/scripts/install-agent-web.sh" "${component_args[@]}"
+    if bash "$staging_dir/scripts/install-agent-web.sh" "${component_args[@]}"; then
+        :
+    else
+        component_status=$?
+        if [[ $agent_web_strict -eq 1 ]]; then
+            exit "$component_status"
+        fi
+        echo "Warning: the existing optional Agent Web component could not be upgraded or verified." >&2
+        echo "Continuing the Agent-OS core update; Browser Tasks will remain BLOCKED until a compatible adapter is installed." >&2
+        echo "Retry explicitly with --force-agent-web-update after repairing Agent Web." >&2
+    fi
 else
     echo "Agent Web installation skipped; any existing installation is left untouched."
 fi
