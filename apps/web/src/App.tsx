@@ -150,11 +150,11 @@ function TelegramCard() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [showGuide, setShowGuide] = useState(false);
+  const [guideStep, setGuideStep] = useState(1);
   const [token, setToken] = useState("");
   const refresh = () => client.telegramStatus().then((next) => {
     setStatus(next);
     if (next.connected) setPairing(undefined);
-    if (!next.configured) setShowGuide(true);
   }).catch((error) => setNotice(messageFor(error)));
   useEffect(() => {
     void refresh();
@@ -166,6 +166,14 @@ function TelegramCard() {
     const timer = window.setInterval(() => void refresh(), 2_000);
     return () => window.clearInterval(timer);
   }, [pairing]);
+  useEffect(() => {
+    if (!showGuide) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) setShowGuide(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showGuide, busy]);
   const connect = async () => {
     setBusy(true); setNotice("");
     try { setPairing(await client.startTelegramPairing()); }
@@ -193,27 +201,35 @@ function TelegramCard() {
       setStatus(configured.connection);
       setPairing(configured.pairing);
       setToken("");
-      setNotice("Bot Token 已驗證並安全保存，請完成 Telegram 帳號配對。");
+      setNotice("");
+      setGuideStep(3);
     } catch (error) { setNotice(messageFor(error)); }
     finally { setBusy(false); }
+  };
+  const openGuide = async () => {
+    setNotice("");
+    setGuideStep(status?.configured ? 3 : 1);
+    setShowGuide(true);
+    if (status?.configured && status.running && !pairing) await connect();
+    else if (status?.configured && !status.running) setNotice(status.lastError ?? "Telegram 服務目前無法啟動，請稍後再試。");
   };
   const state = !status?.configured ? "unavailable" : status.connected ? "connected" : status.running ? "disconnected" : "error";
   return <section className={`provider-card telegram-card ${state}`}>
     <div className="provider-logo"><Icon name="wifi" size={24} /></div>
-    <div className="provider-copy"><div><h2>Telegram</h2><span className="provider-state"><i />{!status ? "檢查中" : !status.configured ? "尚未設定 Token" : status.connected ? "已連線" : status.running ? "等待配對" : "連線異常"}</span></div><p>{status?.connected ? `${status.connectedDisplayName ?? "Telegram 帳號"}・@${status.botUsername ?? "bot"}` : status?.configured ? `透過 @${status.botUsername ?? "Telegram Bot"} 從手機傳送指令並接收 Agent-OS 通知。` : "先在樹莓派設定 BotFather 提供的 Token，重新啟動 Agent-OS 後即可配對。"}</p></div>
-    {status?.connected ? <div className="telegram-actions"><button className="secondary" disabled={busy} onClick={() => void test()}>傳送測試</button><button className="secondary danger-button" disabled={busy} onClick={() => void disconnect()}>解除配對</button></div> : <div className="telegram-actions telegram-setup-actions"><button className="secondary" onClick={() => setShowGuide((value) => !value)}>{showGuide ? "收合教學" : "設定教學"}</button><button className="primary" disabled={busy || !status?.configured || !status.running} onClick={() => void connect()}>{busy ? "產生中…" : "連接 Telegram"}<Icon name="arrow" size={17} /></button></div>}
-    {showGuide && <div className="telegram-guide">
-      <header><div><p className="eyebrow">Telegram setup</p><h3>用 BotFather 完成安全設定</h3></div><button className="icon-only" onClick={() => setShowGuide(false)} aria-label="收合教學"><Icon name="close" size={17} /></button></header>
-      <ol>
-        <li><span>1</span><div><strong>建立 Telegram Bot</strong><p>在 Telegram 開啟 BotFather，傳送 <code>/newbot</code>，依序設定名稱與以 <code>bot</code> 結尾的 username。</p><a href="https://t.me/BotFather" target="_blank" rel="noreferrer">開啟 @BotFather<Icon name="arrow" size={14} /></a></div></li>
-        <li><span>2</span><div><strong>貼上 BotFather 提供的 Token</strong><p>BotFather 會提供一段像 <code>123456789:AA...</code> 的 Bot Token。Agent-OS 會先向 Telegram 驗證，再以僅限系統使用者讀取的權限保存在樹莓派。</p><form className="telegram-token-form" onSubmit={(event) => void configure(event)}><label>Bot Token<input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="貼上完整 Bot Token" autoComplete="off" spellCheck={false} /></label><button className="primary" disabled={busy || !token.trim()}>{busy ? "驗證中…" : "驗證並連接"}</button></form></div></li>
-        <li><span>3</span><div><strong>配對你的 Telegram 帳號</strong><p>Token 驗證成功後會自動產生 10 分鐘有效的配對連結。開啟 Bot 並送出 <code>/start 配對碼</code>，完成後即可雙向傳訊。</p></div></li>
-      </ol>
-      <p className="telegram-token-warning"><Icon name="warning" size={15} />Token 只透過目前的 HTTPS 連線送到你的樹莓派，不寫入資料庫或瀏覽器儲存空間。如果曾經外洩，請立即在 BotFather 使用 <code>/revoke</code>。</p>
+    <div className="provider-copy"><div><h2>Telegram</h2><span className="provider-state"><i />{!status ? "檢查中" : !status.configured ? "尚未連接" : status.connected ? "已連線" : status.running ? "等待配對" : "連線異常"}</span></div><p>{status?.connected ? `${status.connectedDisplayName ?? "Telegram 帳號"}・@${status.botUsername ?? "bot"}` : status?.configured ? `透過 @${status.botUsername ?? "Telegram Bot"} 從手機傳送指令並接收 Agent-OS 通知。` : "連接你的 Telegram，從手機傳送訊息並接收 Agent-OS 通知。"}</p></div>
+    {status?.connected ? <div className="telegram-actions"><button className="secondary" disabled={busy} onClick={() => void test()}>傳送測試</button><button className="secondary danger-button" disabled={busy} onClick={() => void disconnect()}>解除配對</button></div> : <div className="telegram-actions"><button className="primary" disabled={busy || !status} onClick={() => void openGuide()}>{busy ? "準備中…" : "連接 Telegram"}<Icon name="arrow" size={17} /></button></div>}
+    {showGuide && <div className="telegram-wizard-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setShowGuide(false); }}>
+      <section className="telegram-wizard" role="dialog" aria-modal="true" aria-labelledby="telegram-wizard-title">
+        <header><div><p className="eyebrow">Telegram setup</p><h2 id="telegram-wizard-title">連接 Telegram</h2></div><button className="icon-only" disabled={busy} onClick={() => setShowGuide(false)} aria-label="關閉設定視窗"><Icon name="close" size={18} /></button></header>
+        <div className="telegram-wizard-progress" aria-label={`步驟 ${guideStep}，共 3 步`}>{[1, 2, 3].map((step) => <span key={step} className={step === guideStep ? "active" : step < guideStep ? "done" : ""}><i>{step < guideStep ? "✓" : step}</i><small>{step === 1 ? "建立 Bot" : step === 2 ? "輸入 Token" : "完成配對"}</small></span>)}</div>
+        {guideStep === 1 && <div className="telegram-wizard-step"><span className="telegram-wizard-mark"><Icon name="wifi" size={27} /></span><h3>先建立你的 Telegram Bot</h3><p>點擊下方按鈕開啟官方 BotFather，傳送 <code>/newbot</code>，再依照 Telegram 的提示設定 Bot 名稱與 username。</p><a className="primary telegram-wizard-open" href="https://t.me/BotFather" target="_blank" rel="noreferrer">開啟 @BotFather<Icon name="arrow" size={16} /></a><p className="telegram-wizard-hint">建立完成後，BotFather 會傳給你一段 Bot Token。請複製它，再回到這個視窗。</p></div>}
+        {guideStep === 2 && <form className="telegram-wizard-step" onSubmit={(event) => void configure(event)}><span className="telegram-wizard-mark"><Icon name="lock" size={27} /></span><h3>貼上 Bot Token</h3><p>將 BotFather 提供、格式類似 <code>123456789:AA...</code> 的完整 Token 貼在下方。Agent-OS 會先向 Telegram 驗證。</p><label className="telegram-token-field">Bot Token<input autoFocus type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="貼上完整 Bot Token" autoComplete="off" spellCheck={false} /></label>{notice && <div className="telegram-wizard-error"><Icon name="warning" size={15} />{notice}</div>}<p className="telegram-token-warning"><Icon name="lock" size={15} />Token 只會送到這台樹莓派，且不會儲存在瀏覽器或資料庫。</p><div className="telegram-wizard-footer"><button type="button" className="secondary" disabled={busy} onClick={() => { setNotice(""); setGuideStep(1); }}>上一步</button><button className="primary" disabled={busy || !token.trim()}>{busy ? "驗證中…" : "驗證並下一步"}<Icon name="arrow" size={16} /></button></div></form>}
+        {guideStep === 3 && <div className="telegram-wizard-step"><span className={`telegram-wizard-mark ${status?.connected ? "success" : ""}`}><Icon name={status?.connected ? "check" : "wifi"} size={27} /></span><h3>{status?.connected ? "Telegram 已連接" : "最後，配對你的帳號"}</h3><p>{status?.connected ? `已成功連接 ${status.connectedDisplayName ?? "你的 Telegram 帳號"}，現在可以從 Telegram 傳訊息給 Agent-OS。` : <>點擊「開啟 Telegram」，配對指令會自動帶入；將訊息送給 Bot 就能完成連接。</>}</p>{!status?.connected && pairing && <div className="telegram-wizard-code"><small>一次性配對碼</small><strong>{pairing.code}</strong><span>10 分鐘內有效</span></div>}{!status?.connected && !pairing && !notice && <div className="telegram-wizard-wait"><span className="loader" />正在準備配對連結…</div>}{notice && !status?.connected && <div className="telegram-wizard-error"><Icon name="warning" size={15} />{notice}</div>}<div className="telegram-wizard-footer">{status?.connected ? <button className="primary" onClick={() => setShowGuide(false)}>完成</button> : <>{!status?.configured && <button className="secondary" disabled={busy} onClick={() => setGuideStep(2)}>上一步</button>}{pairing?.deepLink ? <a className="primary" href={pairing.deepLink} target="_blank" rel="noreferrer">開啟 Telegram<Icon name="arrow" size={16} /></a> : notice && status?.running ? <button className="primary" disabled={busy} onClick={() => void connect()}>{busy ? "準備中…" : "重新產生配對連結"}</button> : null}</>}</div></div>}
+        {guideStep === 1 && <div className="telegram-wizard-footer"><button className="secondary" onClick={() => setShowGuide(false)}>取消</button><button className="primary" onClick={() => setGuideStep(2)}>下一步<Icon name="arrow" size={16} /></button></div>}
+      </section>
     </div>}
-    {pairing && <div className="telegram-pairing"><div><small>一次性配對碼</small><strong>{pairing.code}</strong><span>10 分鐘內有效</span></div>{pairing.deepLink && <a className="primary" href={pairing.deepLink} target="_blank" rel="noreferrer">開啟 Telegram<Icon name="arrow" size={16} /></a>}</div>}
-    {(notice || status?.lastError) && <div className="provider-error"><Icon name="warning" size={16} />{notice || status?.lastError}</div>}
-    <small className="provider-security"><Icon name="lock" size={14} />只接受完成配對的 Telegram 數字使用者 ID；Bot Token 不會傳到瀏覽器。</small>
+    {(!showGuide && (notice || status?.lastError)) && <div className="provider-error"><Icon name="warning" size={16} />{notice || status?.lastError}</div>}
+    <small className="provider-security"><Icon name="lock" size={14} />只接受完成配對的 Telegram 數字使用者 ID；Bot Token 不會保存在瀏覽器。</small>
   </section>;
 }
 

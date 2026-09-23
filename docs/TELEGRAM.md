@@ -20,7 +20,7 @@ Agent-OS 可透過 BotFather 建立的 Telegram Bot，在手機與樹莓派之�
 3. 設定顯示名稱與以 `bot` 結尾的 username。
 4. 保存 BotFather 提供的 Bot Token。
 
-Token 等同 Bot 的控制密碼，不要貼到聊天、Issue、Git commit 或 Web 表單。如果 Token 外洩，立即在 BotFather 撤銷並產生新 Token。
+Token 等同 Bot 的控制密碼，只能貼到 Agent-OS 的 Telegram 設定精靈；不要貼到聊天、Issue、Git commit 或其他網站。如果 Token 外洩，立即在 BotFather 撤銷並產生新 Token。
 
 可在 BotFather 使用 `/setcommands` 設定：
 
@@ -33,7 +33,9 @@ unlink - 解除配對
 
 ## 2. 在 Web UI 驗證並保存 Token
 
-開啟「設定 → Telegram → 設定教學」，貼上 BotFather 提供的完整 Token，再按「驗證並連接」。Agent-OS 會透過 HTTPS 接收 Token、呼叫 Telegram `getMe` 驗證、以 `0600` 權限寫入樹莓派的 credential file，並立即啟動 Channel 與產生配對連結。Token 不寫入 SQLite、瀏覽器儲存空間或 activity log。
+開啟「設定 → Telegram」，按「連接 Telegram」後會顯示三步驟設定精靈：開啟 BotFather、貼上 Token、完成帳號配對。每一步只需依照彈出視窗按「下一步」，不需要登入樹莓派或輸入終端機指令。
+
+Agent-OS 會透過 HTTPS 接收 Token、呼叫 Telegram `getMe` 驗證、以 `0600` 權限寫入樹莓派的 credential file，並立即啟動 Channel 與產生配對連結。Token 不寫入 SQLite、瀏覽器儲存空間或 activity log。
 
 Agent-OS 預設讀取：
 
@@ -57,8 +59,8 @@ systemctl --user restart agent-os
 ## 3. 配對 Telegram 帳號
 
 1. 開啟 Agent-OS Web UI 的「設定」。
-2. Telegram 顯示「等待配對」後，按「連接 Telegram」。
-3. 按「開啟 Telegram」，或手動向 Bot 傳送 `/start 配對碼`。
+2. 按「連接 Telegram」，依照彈出視窗完成 BotFather 與 Token 驗證步驟。
+3. 在設定精靈最後一步按「開啟 Telegram」，配對指令會自動帶入；也可手動向 Bot 傳送 `/start 配對碼`。
 4. Bot 回覆「已成功連接 Agent-OS」即完成。
 5. 回到設定頁按「傳送測試」驗證雙向通訊。
 
