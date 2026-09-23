@@ -31,9 +31,9 @@ status - 查看通訊狀態
 unlink - 解除配對
 ```
 
-## 2. 在樹莓派保存 Token
+## 2. 在 Web UI 驗證並保存 Token
 
-Web UI 的「設定 → Telegram → 設定教學」會顯示相同流程、提供 BotFather 入口與可複製指令，並在完成後重新檢查 Gateway 狀態。Token 刻意不透過 Web 表單傳送或保存。
+開啟「設定 → Telegram → 設定教學」，貼上 BotFather 提供的完整 Token，再按「驗證並連接」。Agent-OS 會透過 HTTPS 接收 Token、呼叫 Telegram `getMe` 驗證、以 `0600` 權限寫入樹莓派的 credential file，並立即啟動 Channel 與產生配對連結。Token 不寫入 SQLite、瀏覽器儲存空間或 activity log。
 
 Agent-OS 預設讀取：
 
@@ -41,7 +41,7 @@ Agent-OS 預設讀取：
 ~/.local/state/agent-os/credentials/telegram-bot-token
 ```
 
-透過 SSH 執行以下命令，貼上 Token 時畫面不會顯示內容：
+如需 headless／進階設定，也可以透過 SSH 執行以下命令；貼上 Token 時畫面不會顯示內容：
 
 ```bash
 install -d -m 0700 "$HOME/.local/state/agent-os/credentials"
@@ -78,6 +78,7 @@ systemctl --user restart agent-os
 
 ```text
 GET    /api/v1/channels/telegram
+POST   /api/v1/channels/telegram/configure
 POST   /api/v1/channels/telegram/pairing
 POST   /api/v1/channels/telegram/test
 DELETE /api/v1/channels/telegram

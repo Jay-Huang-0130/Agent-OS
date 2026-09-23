@@ -144,20 +144,13 @@ function Services({ system }: { system: SystemStatus }) {
   return <div className="service-list">{system.services.map((service) => <div className="service-item" key={service.id}><span><Icon name={service.id === "browser" ? "browser" : service.id === "model" ? "model" : "server"} /></span><div><strong>{service.name}</strong><small>{service.detail}</small></div>{service.latencyMs !== undefined && <em>{service.latencyMs} ms</em>}<b className={service.state}><i />{service.state === "healthy" ? "運作中" : service.state === "degraded" ? "需注意" : service.state === "starting" ? "啟動中" : "未啟用"}</b></div>)}</div>;
 }
 
-const telegramTokenSetupCommand = `install -d -m 0700 "$HOME/.local/state/agent-os/credentials"
-read -rsp 'Telegram Bot Token: ' token; echo
-printf '%s\\n' "$token" > "$HOME/.local/state/agent-os/credentials/telegram-bot-token"
-chmod 0600 "$HOME/.local/state/agent-os/credentials/telegram-bot-token"
-unset token
-systemctl --user restart agent-os`;
-
 function TelegramCard() {
   const [status, setStatus] = useState<TelegramConnection>();
   const [pairing, setPairing] = useState<TelegramPairing>();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [showGuide, setShowGuide] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [token, setToken] = useState("");
   const refresh = () => client.telegramStatus().then((next) => {
     setStatus(next);
     if (next.connected) setPairing(undefined);
@@ -191,17 +184,18 @@ function TelegramCard() {
     catch (error) { setNotice(messageFor(error)); }
     finally { setBusy(false); }
   };
-  const copySetupCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(telegramTokenSetupCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2_000);
-    } catch { setNotice("無法自動複製，請手動選取下方指令。"); }
-  };
-  const recheck = async () => {
+  const configure = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!token.trim()) return;
     setBusy(true); setNotice("");
-    await refresh();
-    setBusy(false);
+    try {
+      const configured = await client.configureTelegram(token.trim());
+      setStatus(configured.connection);
+      setPairing(configured.pairing);
+      setToken("");
+      setNotice("Bot Token 已驗證並安全保存，請完成 Telegram 帳號配對。");
+    } catch (error) { setNotice(messageFor(error)); }
+    finally { setBusy(false); }
   };
   const state = !status?.configured ? "unavailable" : status.connected ? "connected" : status.running ? "disconnected" : "error";
   return <section className={`provider-card telegram-card ${state}`}>
@@ -212,11 +206,10 @@ function TelegramCard() {
       <header><div><p className="eyebrow">Telegram setup</p><h3>用 BotFather 完成安全設定</h3></div><button className="icon-only" onClick={() => setShowGuide(false)} aria-label="收合教學"><Icon name="close" size={17} /></button></header>
       <ol>
         <li><span>1</span><div><strong>建立 Telegram Bot</strong><p>在 Telegram 開啟 BotFather，傳送 <code>/newbot</code>，依序設定名稱與以 <code>bot</code> 結尾的 username。</p><a href="https://t.me/BotFather" target="_blank" rel="noreferrer">開啟 @BotFather<Icon name="arrow" size={14} /></a></div></li>
-        <li><span>2</span><div><strong>在樹莓派保存 Token</strong><p>SSH 登入樹莓派，以一般使用者執行下列指令。輸入時 Token 不會顯示，也不會送進瀏覽器。</p><div className="telegram-command"><pre>{telegramTokenSetupCommand}</pre><button className="secondary" onClick={() => void copySetupCommand()}>{copied ? "已複製" : "複製指令"}</button></div></div></li>
-        <li><span>3</span><div><strong>讓 Agent-OS 重新檢查</strong><p>指令完成後回到這裡重新檢查；狀態應從「尚未設定 Token」變成「等待配對」。</p><button className="secondary" disabled={busy} onClick={() => void recheck()}>{busy ? "檢查中…" : "我已設定，重新檢查"}</button></div></li>
-        <li><span>4</span><div><strong>配對你的 Telegram 帳號</strong><p>點擊「連接 Telegram」取得 10 分鐘有效的配對碼，再開啟 Bot 並傳送 <code>/start 配對碼</code>。完成後可以傳送測試訊息。</p></div></li>
+        <li><span>2</span><div><strong>貼上 BotFather 提供的 Token</strong><p>BotFather 會提供一段像 <code>123456789:AA...</code> 的 Bot Token。Agent-OS 會先向 Telegram 驗證，再以僅限系統使用者讀取的權限保存在樹莓派。</p><form className="telegram-token-form" onSubmit={(event) => void configure(event)}><label>Bot Token<input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="貼上完整 Bot Token" autoComplete="off" spellCheck={false} /></label><button className="primary" disabled={busy || !token.trim()}>{busy ? "驗證中…" : "驗證並連接"}</button></form></div></li>
+        <li><span>3</span><div><strong>配對你的 Telegram 帳號</strong><p>Token 驗證成功後會自動產生 10 分鐘有效的配對連結。開啟 Bot 並送出 <code>/start 配對碼</code>，完成後即可雙向傳訊。</p></div></li>
       </ol>
-      <p className="telegram-token-warning"><Icon name="warning" size={15} />不要把 Bot Token 貼到聊天、GitHub 或網頁表單；如果曾經外洩，請立即在 BotFather 使用 <code>/revoke</code>。</p>
+      <p className="telegram-token-warning"><Icon name="warning" size={15} />Token 只透過目前的 HTTPS 連線送到你的樹莓派，不寫入資料庫或瀏覽器儲存空間。如果曾經外洩，請立即在 BotFather 使用 <code>/revoke</code>。</p>
     </div>}
     {pairing && <div className="telegram-pairing"><div><small>一次性配對碼</small><strong>{pairing.code}</strong><span>10 分鐘內有效</span></div>{pairing.deepLink && <a className="primary" href={pairing.deepLink} target="_blank" rel="noreferrer">開啟 Telegram<Icon name="arrow" size={16} /></a>}</div>}
     {(notice || status?.lastError) && <div className="provider-error"><Icon name="warning" size={16} />{notice || status?.lastError}</div>}

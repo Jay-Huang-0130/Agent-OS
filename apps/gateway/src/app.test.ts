@@ -12,6 +12,7 @@ import type { ModelRunRequest, ModelRunResult, ModelRuntime } from "./modelRunti
 import type { ModelOption } from "./modelRuntime.js";
 import type { CapabilityExecutor } from "./wakeEngine.js";
 import type { WatcherFetcher } from "./phase7Runtime.js";
+import type { TelegramBotApi, TelegramUpdate } from "./telegram.js";
 
 const apps: FastifyInstance[] = [];
 
@@ -20,7 +21,8 @@ afterEach(async () => {
 });
 
 async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: CapabilityExecutor, modelRuntime?: ModelRuntime,
-  watcherFetcher?: WatcherFetcher, browserAdapter?: BrowserAdapter) {
+  watcherFetcher?: WatcherFetcher, browserAdapter?: BrowserAdapter,
+  telegramApiFactory?: (token: string) => TelegramBotApi) {
   const stateDir = mkdtempSync(join(tmpdir(), "agent-os-gateway-"));
   const config = loadConfig({
     stateDir,
@@ -34,10 +36,18 @@ async function fixture(openAIAuth?: OpenAIAuthService, capabilityExecutor?: Capa
     ...(modelRuntime ? { modelRuntime } : {}),
     ...(watcherFetcher ? { watcherFetcher } : {}),
     ...(browserAdapter ? { browserAdapter } : {}),
+    ...(telegramApiFactory ? { telegramApiFactory } : {}),
     startWakeEngine: false,
+    startTelegram: false,
   });
   apps.push(app);
   return { app, config };
+}
+
+class ConfiguredTelegramApi implements TelegramBotApi {
+  async getMe() { return { id: 42, username: "agent_os_guided_bot", first_name: "Agent OS" }; }
+  async getUpdates(): Promise<TelegramUpdate[]> { return []; }
+  async sendMessage(): Promise<{ messageId: number }> { return { messageId: 1 }; }
 }
 
 class ReadyBrowserAdapter implements BrowserAdapter {
@@ -162,6 +172,33 @@ test("Phase 9 calendar and agenda APIs require the owner and expose conflicts", 
   assert.ok(Array.isArray(agenda.json().conflicts));
   const denied = await app.inject({ method: "POST", url: "/api/v1/briefings/daily", headers: { cookie }, payload: {} });
   assert.equal(denied.statusCode, 403);
+});
+
+test("Telegram can be securely configured from the Web UI without a Gateway restart", async () => {
+  let receivedToken = "";
+  const { app, config } = await fixture(undefined, undefined, undefined, undefined, undefined, (token) => {
+    receivedToken = token;
+    return new ConfiguredTelegramApi();
+  });
+  const pairingCode = readFileSync(config.pairingCodePath, "utf8").trim();
+  const setup = await app.inject({ method: "POST", url: "/api/v1/setup/complete",
+    payload: { pairingCode, password: "long-enough-password", displayName: "Owner" } });
+  const cookie = setup.headers["set-cookie"];
+  assert.ok(cookie);
+  const session = await app.inject({ method: "GET", url: "/api/v1/auth/session", headers: { cookie } });
+  const token = `123456789:${"A".repeat(35)}`;
+  const denied = await app.inject({ method: "POST", url: "/api/v1/channels/telegram/configure",
+    headers: { cookie }, payload: { token } });
+  assert.equal(denied.statusCode, 403);
+  const configured = await app.inject({ method: "POST", url: "/api/v1/channels/telegram/configure",
+    headers: { cookie, "x-csrf-token": session.json().csrfToken as string }, payload: { token } });
+  assert.equal(configured.statusCode, 201);
+  assert.equal(configured.json().connection.configured, true);
+  assert.equal(configured.json().connection.botUsername, "agent_os_guided_bot");
+  assert.match(configured.json().pairing.deepLink, /^https:\/\/t\.me\/agent_os_guided_bot\?start=/u);
+  assert.equal(receivedToken, token);
+  assert.equal(readFileSync(config.telegramBotTokenFile, "utf8").trim(), token);
+  assert.equal(configured.body.includes(token), false, "the API must never echo the Bot Token");
 });
 
 test("protected routes require authentication and CSRF", async () => {

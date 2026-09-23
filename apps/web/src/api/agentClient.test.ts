@@ -90,6 +90,35 @@ describe("AgentClient", () => {
     expect(new Headers(init.headers).get("x-csrf-token")).toBe("csrf-telegram");
   });
 
+  it("submits a BotFather token through the authenticated Telegram configuration endpoint", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: "Agent-OS", version: "0.1.0", setupRequired: false, secure: true, hostname: "pi",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authenticated: true, csrfToken: "csrf-configure", user: { id: "owner", displayName: "Owner", initials: "OW" },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        connection: { configured: true, running: true, botUsername: "agent_os_bot", connected: false,
+          connectedDisplayName: null, lastError: null },
+        pairing: { code: "ABCDEFGH", expiresAt: "2026-09-23T01:00:00.000Z",
+          deepLink: "https://t.me/agent_os_bot?start=ABCDEFGH" },
+      }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentClient();
+    await client.bootstrap();
+    const token = `123456789:${"A".repeat(35)}`;
+
+    const result = await client.configureTelegram(token);
+
+    expect(result.connection.configured).toBe(true);
+    const [path, init] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(path).toBe("/api/v1/channels/telegram/configure");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ token });
+    expect(new Headers(init.headers).get("x-csrf-token")).toBe("csrf-configure");
+  });
+
   it("creates durable Goals with CSRF and an idempotency key", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({

@@ -33,6 +33,7 @@ import type {
   SetupInput,
   SystemStatus,
   TelegramConnection,
+  TelegramConfiguration,
   TelegramPairing,
   NotificationItem,
   WatcherObservation,
@@ -332,6 +333,12 @@ export class AgentClient {
 
   telegramStatus(): Promise<TelegramConnection> {
     return this.request<TelegramConnection>("/api/v1/channels/telegram");
+  }
+
+  configureTelegram(token: string): Promise<TelegramConfiguration> {
+    return this.request<TelegramConfiguration>("/api/v1/channels/telegram/configure", {
+      method: "POST", body: JSON.stringify({ token }),
+    }, true);
   }
 
   startTelegramPairing(): Promise<TelegramPairing> {

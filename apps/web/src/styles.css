@@ -245,9 +245,10 @@ button:disabled { cursor: not-allowed; opacity: .62; }
 .telegram-guide li p { margin: 4px 0 9px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .telegram-guide li code, .telegram-token-warning code { padding: 2px 5px; border-radius: 5px; color: var(--green); background: var(--green-soft); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .telegram-guide li a { display: inline-flex; align-items: center; gap: 5px; color: var(--green); font-size: 11px; font-weight: 700; text-decoration: none; }
-.telegram-command { position: relative; display: grid; gap: 8px; }
-.telegram-command pre { margin: 0; padding: 13px; overflow-x: auto; border-radius: 10px; color: #dff8eb; background: #102a22; font: 10px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
-.telegram-command button { justify-self: start; }
+.telegram-token-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; }
+.telegram-token-form label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.telegram-token-form input { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--panel); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; outline: none; }
+.telegram-token-form input:focus { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 12%, transparent); }
 .telegram-token-warning { display: flex; align-items: flex-start; gap: 7px; margin: 12px 0 0; color: var(--amber); font-size: 10px; line-height: 1.55; }
 .telegram-token-warning svg { flex: 0 0 auto; margin-top: 1px; }
 .oauth-layer { position: fixed; z-index: 80; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(14, 26, 20, .52); backdrop-filter: blur(8px); }
@@ -338,6 +339,7 @@ button:disabled { cursor: not-allowed; opacity: .62; }
   .telegram-actions, .telegram-pairing, .telegram-guide { grid-column: 1 / -1; width: 100%; }
   .telegram-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .telegram-pairing { align-items: stretch; flex-direction: column; }
+  .telegram-token-form { grid-template-columns: 1fr; }
   .chat-dock { left: 0; padding: 15px 13px; }
   .chat-dock span { display: none; }
 }

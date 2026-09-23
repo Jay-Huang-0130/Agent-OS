@@ -164,6 +164,10 @@ export class TelegramChannelService {
     };
   }
 
+  setVerifiedBot(identity: TelegramBotIdentity): void {
+    this.bot = identity;
+  }
+
   createPairing(ownerUserId: string, ttlMs = 10 * 60_000): { code: string; expiresAt: string; deepLink: string | null } {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     const bytes = randomBytes(8);

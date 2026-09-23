@@ -12,6 +12,7 @@ export interface GatewayConfig {
   codexEntrypoint: string;
   pythonExecutable: string;
   agentWebController: string;
+  telegramBotTokenFile: string;
   telegramBotToken?: string;
   webDistPath: string;
   tlsCertPath?: string;
@@ -56,6 +57,7 @@ export function loadConfig(overrides: Partial<GatewayConfig> = {}): GatewayConfi
     pythonExecutable: process.env.AGENT_OS_PYTHON ?? (process.platform === "win32" ? "python" : "python3"),
     agentWebController: process.env.AGENT_OS_BROWSER_CTL
       ?? (existsSync(localAgentWebController) ? localAgentWebController : "agent-webctl"),
+    telegramBotTokenFile: telegramTokenFile,
     ...(telegramBotToken ? { telegramBotToken } : {}),
     webDistPath: process.env.AGENT_OS_WEB_DIST
       ? resolve(process.env.AGENT_OS_WEB_DIST)

@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -177,6 +177,9 @@ const approvalDecisionSchema = z.object({
   decision: z.enum(["APPROVED", "REJECTED"]),
   reason: z.string().trim().min(1).max(2_000),
 }).strict();
+const telegramConfigureSchema = z.object({
+  token: z.string().trim().min(24).max(256).regex(/^\d+:[A-Za-z0-9_-]{20,}$/u),
+}).strict();
 const calendarEventSchema = z.object({
   title: z.string().trim().min(1).max(240),
   description: z.string().trim().max(8_000).optional(),
@@ -229,6 +232,7 @@ export interface BuildAppOptions {
   startPlanRunner?: boolean;
   startWatcherEngine?: boolean;
   telegramApi?: TelegramBotApi;
+  telegramApiFactory?: (token: string) => TelegramBotApi;
   startTelegram?: boolean;
   startSecretaryEngine?: boolean;
 }
@@ -240,6 +244,21 @@ function apiError(reply: FastifyReply, status: number, code: string, message: st
 function storedJson(value: unknown): unknown {
   if (typeof value !== "string" || !value) return null;
   try { return JSON.parse(value) as unknown; } catch { return null; }
+}
+
+function persistPrivateCredential(path: string, value: string): void {
+  const parent = dirname(path);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  chmodSync(parent, 0o700);
+  const temporary = `${path}.${randomBytes(8).toString("hex")}.tmp`;
+  try {
+    writeFileSync(temporary, `${value}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, path);
+    chmodSync(path, 0o600);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
 }
 
 function kernelApiError(reply: FastifyReply, error: unknown) {
@@ -422,9 +441,10 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     ? new AssistantIntakeService(database, requestRouter, options.requestRouter ? undefined : assistantExecution)
     : new AssistantIntakeService(database);
   let telegramConfigurationError: string | null = null;
+  const telegramApiFactory = options.telegramApiFactory ?? ((token: string) => new HttpTelegramBotApi(token));
   let telegramApi = options.telegramApi;
   if (!telegramApi && config.telegramBotToken) {
-    try { telegramApi = new HttpTelegramBotApi(config.telegramBotToken); }
+    try { telegramApi = telegramApiFactory(config.telegramBotToken); }
     catch { telegramConfigurationError = "Telegram Bot Token format is invalid."; }
   }
   telegramChannel = telegramApi ? new TelegramChannelService(database, assistantIntake, telegramApi) : undefined;
@@ -678,12 +698,48 @@ export async function buildApp(config: GatewayConfig, options: BuildAppOptions =
     };
   });
 
+  app.post("/api/v1/channels/telegram/configure", async (request, reply) => {
+    const session = requireSession(request, reply, database);
+    if (!session || !requireCsrf(request, reply, session)) return;
+    const parsed = telegramConfigureSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return apiError(reply, 400, "invalid_telegram_token", "Paste the complete Bot Token supplied by BotFather.");
+    }
+    let candidateApi: TelegramBotApi;
+    try { candidateApi = telegramApiFactory(parsed.data.token); }
+    catch { return apiError(reply, 400, "invalid_telegram_token", "The Bot Token format is invalid."); }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    let identity;
+    try {
+      identity = await candidateApi.getMe(controller.signal);
+    } catch {
+      return apiError(reply, 422, "telegram_token_rejected",
+        "Telegram could not verify this Token. Copy a fresh Token from BotFather and try again.");
+    } finally {
+      clearTimeout(timeout);
+    }
+    try { persistPrivateCredential(config.telegramBotTokenFile, parsed.data.token); }
+    catch { return apiError(reply, 500, "telegram_token_store_failed", "Agent-OS could not securely save the Bot Token."); }
+    const previous = telegramChannel;
+    const replacement = new TelegramChannelService(database, assistantIntake, candidateApi);
+    replacement.setVerifiedBot(identity);
+    await previous?.stop();
+    telegramChannel = replacement;
+    telegramConfigurationError = null;
+    if (options.startTelegram !== false) replacement.start();
+    const pairing = replacement.createPairing(session.userId);
+    addActivity("settings", "Telegram bot configured",
+      `${session.displayName} verified @${identity.username ?? identity.first_name} and started account pairing.`);
+    return reply.code(201).send({ connection: replacement.status(), pairing });
+  });
+
   app.post("/api/v1/channels/telegram/pairing", async (request, reply) => {
     const session = requireSession(request, reply, database);
     if (!session || !requireCsrf(request, reply, session)) return;
     if (!telegramChannel) {
       return apiError(reply, 503, "telegram_not_configured",
-        telegramConfigurationError ?? "Set AGENT_OS_TELEGRAM_BOT_TOKEN_FILE and restart Agent-OS before pairing Telegram.");
+        telegramConfigurationError ?? "Configure a BotFather Token before pairing Telegram.");
     }
     const pairing = telegramChannel.createPairing(session.userId);
     addActivity("settings", "Telegram pairing started", `${session.displayName} generated a short-lived Telegram pairing code.`);

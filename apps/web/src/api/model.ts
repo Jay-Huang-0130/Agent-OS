@@ -120,6 +120,11 @@ export interface TelegramPairing {
   deepLink: string | null;
 }
 
+export interface TelegramConfiguration {
+  connection: TelegramConnection;
+  pairing: TelegramPairing;
+}
+
 export interface SetupInput {
   pairingCode: string;
   password: string;
