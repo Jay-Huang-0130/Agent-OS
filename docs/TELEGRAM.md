@@ -33,6 +33,8 @@ unlink - 解除配對
 
 ## 2. 在樹莓派保存 Token
 
+Web UI 的「設定 → Telegram → 設定教學」會顯示相同流程、提供 BotFather 入口與可複製指令，並在完成後重新檢查 Gateway 狀態。Token 刻意不透過 Web 表單傳送或保存。
+
 Agent-OS 預設讀取：
 
 ```text
